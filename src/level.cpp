@@ -25,7 +25,7 @@
 #  define be64toh(x) betoh64(x)
 #endif
 
-#define TILE_SIZE 50.0f
+#define TILE_SIZE 70.0f
 
 using Arcade::Error;
 
@@ -108,6 +108,7 @@ void Arcade::Chunk::draw(sf::RenderTarget& target, sf::RenderStates states) cons
 }
 void Arcade::Chunk::doTilePostInit() {
 	for( size_t i = 0; i < tiles.size(); i++ ) {
+		if(tiles[i].flags & Arcade::Tile::Flags::Empty) continue;
 		size_t x = i % size;
 		size_t y = i / size;
 
