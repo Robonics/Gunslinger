@@ -1,5 +1,6 @@
 #pragma once
 
+#include <bitset>
 #define ALV_MAGIC 0x00414C56
 #define ATSET_MAGIC 0x004154534554AFAF
 
@@ -14,9 +15,18 @@ namespace Arcade {
 
 	class Engine;
 
+	enum class TileRenderMode {
+		Static=0,
+		Autotile,
+		Animated,
+		Random,
+		Autotile_Random,
+	};
+
 	class TileRegistryEntry {
 		friend class Tile;
 		friend class Chunk;
+		TileRenderMode r_mode{TileRenderMode::Static};
 		std::weak_ptr<sf::Texture> texture;
 
 	public:
@@ -25,12 +35,15 @@ namespace Arcade {
 		explicit TileRegistryEntry( const std::weak_ptr<sf::Texture>& texture );
 
 		const std::weak_ptr<sf::Texture> getTexture();
+		const TileRenderMode getRenderMode() {
+			return r_mode;
+		}
 	};
 
 	class Tile : protected sf::Drawable, sf::Transformable {
 		friend class Chunk;
 		friend class Level;
-
+		std::bitset<4> neighbor;
 		uint8_t flags{};
 		std::weak_ptr<TileRegistryEntry> registryObject;
 		sf::RectangleShape shape;
@@ -77,6 +90,10 @@ namespace Arcade {
 		~Chunk();
 		Tile& getTileAt( size_t i );
 		Tile& getTileAt( unsigned long x, unsigned long y );
+
+		/// This calculates EVERYTHING. Autotile indecies, collison, all of it.
+		/// This should never ever EVER be called regularly. 
+		void doTilePostInit();
 
 		const uint8_t getFlags();
 	};

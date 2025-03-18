@@ -76,6 +76,46 @@ void Arcade::Chunk::draw(sf::RenderTarget& target, sf::RenderStates states) cons
 		(*it).draw( target, n_state );
 	}
 }
+void Arcade::Chunk::doTilePostInit() {
+	for( size_t i = 0; i < tiles.size(); i++ ) {
+		size_t x = i % size;
+		size_t y = i / size;
+
+		// First, set up the neighbor nibble
+		tiles[i].neighbor.reset();
+		if( y != 0 ) { // Top
+			tiles[i].neighbor.set( 0u,
+				tiles[((y-1) * size) + x].registryObject.lock()
+					==
+				tiles[i].registryObject.lock()
+			);
+		}
+		if( x != size-1 ) { // Right
+			tiles[i].neighbor.set( 0u,
+				tiles[(y * size) + (x+1)].registryObject.lock()
+					==
+				tiles[i].registryObject.lock()
+			);
+		}
+		if( y != size-1 ) { // Bottom
+			tiles[i].neighbor.set( 0u,
+				tiles[((y+1) * size) + x].registryObject.lock()
+					==
+				tiles[i].registryObject.lock()
+			);
+		}
+		if( x != 0 ) { // Left
+			tiles[i].neighbor.set( 0u,
+				tiles[(y * size) + (x-1)].registryObject.lock()
+					==
+				tiles[i].registryObject.lock()
+			);
+		}
+	}
+}
+const uint8_t Arcade::Chunk::getFlags() {
+	return this->flags;
+}
 
 Arcade::Level::Level( Arcade::Engine& engine, std::ifstream& file ) {
 	this->load( engine, file );
