@@ -31,8 +31,8 @@ namespace Arcade {
 
 	public:
 		TileRegistryEntry()=delete;
-		explicit TileRegistryEntry( const std::shared_ptr<sf::Texture>& texture );
-		explicit TileRegistryEntry( const std::weak_ptr<sf::Texture>& texture );
+		explicit TileRegistryEntry( const std::shared_ptr<sf::Texture>& texture, TileRenderMode render_mode=TileRenderMode::Static );
+		explicit TileRegistryEntry( const std::weak_ptr<sf::Texture>& texture, TileRenderMode render_mode=TileRenderMode::Static );
 
 		const std::weak_ptr<sf::Texture> getTexture();
 		const TileRenderMode getRenderMode() {
@@ -48,6 +48,7 @@ namespace Arcade {
 		std::weak_ptr<TileRegistryEntry> registryObject;
 		sf::RectangleShape shape;
 	protected:
+		void setup_texture();
 		virtual void draw(sf::RenderTarget& target, sf::RenderStates states) const override;
 	public:
 

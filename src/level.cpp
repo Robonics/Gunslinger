@@ -29,8 +29,8 @@
 
 using Arcade::Error;
 
-Arcade::TileRegistryEntry::TileRegistryEntry( const std::shared_ptr<sf::Texture>& texture ) : texture(texture) {}
-Arcade::TileRegistryEntry::TileRegistryEntry( const std::weak_ptr<sf::Texture>& texture ) : texture( texture ) {}
+Arcade::TileRegistryEntry::TileRegistryEntry( const std::shared_ptr<sf::Texture>& texture, TileRenderMode render_mode ) : texture(texture), r_mode(render_mode) {}
+Arcade::TileRegistryEntry::TileRegistryEntry( const std::weak_ptr<sf::Texture>& texture, TileRenderMode render_mode ) : texture( texture ), r_mode(render_mode) {}
 
 const std::weak_ptr<sf::Texture> Arcade::TileRegistryEntry::getTexture() {
 	return this->texture;
@@ -47,10 +47,40 @@ Arcade::Tile::Tile( Arcade::Engine& engine, const std::string& entry ) {
 	engine.getTileEntry( entry );
 }
 Arcade::Tile::~Tile() {}
+void Arcade::Tile::setup_texture() {
+	switch( registryObject.lock()->r_mode ) {
+        case TileRenderMode::Static:
+			// Simply set the rect to the entire texture
+			this->shape.setTextureRect(sf::Rect<int>(
+				{ 0,0 },
+				static_cast<sf::Vector2i>(registryObject.lock()->texture.lock()->getSize())
+			));
+			break;
+        case TileRenderMode::Autotile: {
+			// We need to use the neighbor calculation here
+			uint8_t t_index = this->neighbor.to_ulong();
+			sf::Vector2u t_size = this->registryObject.lock()->texture.lock()->getSize();
+			this->shape.setTextureRect({
+				{
+					static_cast<int>((t_index % 4) * (t_size.x / 4)),
+					static_cast<int>((t_index / 4) * (t_size.y / 4))
+				},
+				{
+					static_cast<int>(t_size.x / 4),
+					static_cast<int>(t_size.y / 4)
+				}
+			});
+
+			break;
+		}
+		case TileRenderMode::Animated:
+        case TileRenderMode::Random:
+        case TileRenderMode::Autotile_Random:
+    		break;
+	}
+}
 void Arcade::Tile::draw(sf::RenderTarget& target, sf::RenderStates states) const {
 	if( this->registryObject.expired() ) return;
-	// auto p = states.transform.transformPoint({0.0f,0.0f});
-	// std::cout << "Drawing tile at " << p.x << ", " << p.y << std::endl;
 	target.draw( this->shape, states );
 }
 std::weak_ptr<Arcade::TileRegistryEntry> Arcade::Tile::getRegistryEntry() {
@@ -83,6 +113,7 @@ void Arcade::Chunk::doTilePostInit() {
 
 		// First, set up the neighbor nibble
 		tiles[i].neighbor.reset();
+
 		if( y != 0 ) { // Top
 			tiles[i].neighbor.set( 0u,
 				tiles[((y-1) * size) + x].registryObject.lock()
@@ -91,26 +122,32 @@ void Arcade::Chunk::doTilePostInit() {
 			);
 		}
 		if( x != size-1 ) { // Right
-			tiles[i].neighbor.set( 0u,
+			tiles[i].neighbor.set( 1u,
 				tiles[(y * size) + (x+1)].registryObject.lock()
-					==
+				==
 				tiles[i].registryObject.lock()
 			);
 		}
 		if( y != size-1 ) { // Bottom
-			tiles[i].neighbor.set( 0u,
+			tiles[i].neighbor.set( 2u,
 				tiles[((y+1) * size) + x].registryObject.lock()
-					==
+				==
 				tiles[i].registryObject.lock()
 			);
 		}
 		if( x != 0 ) { // Left
-			tiles[i].neighbor.set( 0u,
+			tiles[i].neighbor.set( 3u,
 				tiles[(y * size) + (x-1)].registryObject.lock()
-					==
+				==
 				tiles[i].registryObject.lock()
 			);
 		}
+
+		tiles[i].setup_texture();
+
+		std::cout << "Tested tile (" << x << ", " << y << ") Got neighbor value of " << tiles[i].neighbor.to_ulong();
+		std::cout << "\n\tTexture Rect -> " << tiles[i].shape.getTextureRect().position.x << ", " << tiles[i].shape.getTextureRect().position.y;
+		std::cout << "\t" << tiles[i].shape.getTextureRect().size.x << "x" << tiles[i].shape.getTextureRect().size.y << std::endl;
 	}
 }
 const uint8_t Arcade::Chunk::getFlags() {
@@ -228,6 +265,8 @@ void Arcade::Level::load( Arcade::Engine& engine, std::ifstream& file ) {
 				chunk.tiles.emplace_back( tile_header );
 			}
 		}
+
+		chunk.doTilePostInit();
 
 	}
 }

@@ -259,6 +259,12 @@ namespace Arcade {
 							if(c == '\0') break;
 							tile_name.append( &c, 1u );
 						}
+
+						// Render mode!
+						uint8_t r_mode;
+						file.read( (char*)&r_mode, 1u );
+						// TODO: Validate
+
 						// Now the texture, we need the Engine for this.
 						std::string texture_key;
 						for( char c; file.read(&c, 1u) && file; ) {
@@ -266,7 +272,7 @@ namespace Arcade {
 							texture_key.append( &c, 1u );
 						}
 
-						this->registerTile( tile_name, texture_key );
+						this->registerTile( tile_name, texture_key, (TileRenderMode)r_mode );
 					}
 				});
 			}
@@ -403,8 +409,8 @@ namespace Arcade {
 			return false;
 		}
 
-		bool registerTile( std::string_view identifier, const std::string& texture ) noexcept {
-			return tile_registry.emplace( identifier, std::make_shared<TileRegistryEntry>( getTexture(texture) ) ).second;
+		bool registerTile( std::string_view identifier, const std::string& texture, TileRenderMode r_mode=TileRenderMode::Static ) noexcept {
+			return tile_registry.emplace( identifier, std::make_shared<TileRegistryEntry>( getTexture(texture), r_mode ) ).second;
 		}
 
 		std::weak_ptr<TileRegistryEntry> getTileEntry( const std::string& entry ) const {
