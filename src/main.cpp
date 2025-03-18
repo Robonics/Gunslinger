@@ -5,7 +5,6 @@
 #include <SFML/Graphics.hpp>
 
 #include "SFML/Window/Keyboard.hpp"
-#include "include/arcade_errors.hpp"
 #include "include/engine.hpp"
 #include "include/localizer.hpp"
 
@@ -27,19 +26,9 @@ int main( int argc, const char** argv ) {
 
 	Localizer::loadTranslation("../lang/en_us.csv");
 
-	try {
-		std::ifstream file( "../levels/test.alv" );
-		Arcade::Level lvl( file );
-
-		auto size = lvl.getSize();
-		std::cout << "Loaded " << Localizer::getTranslation( lvl.getName() ) << " with " << size.x << "x" << size.y << " chunks. Each being " << lvl.getChunkSize() << "x" << lvl.getChunkSize() << " tiles." << std::endl;
-	}catch( Arcade::Error<Arcade::ErrorType::FILE_ERROR> e ) {
-		std::cerr << (int)e.type() << " | " << e.what() << std::endl; 
-	}catch( Arcade::Error<Arcade::ErrorType::ARG_ERROR> e ) {
-		std::cerr << (int)e.type() << " | " << e.what() << std::endl;
-	}
-
 	Arcade::Engine engine("Arcade Engine");
+
+	engine.loadLevel("../levels/test.alv");
 
 	engine.bindManager.bind("Meta:Menu", sf::Keyboard::Key::Escape);
 	engine.bindManager.bind("Meta:Debug", sf::Keyboard::Key::P).setModifiers(false, false, true, false);

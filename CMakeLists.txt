@@ -11,8 +11,8 @@ option(BUILD_SHARED_LIBS "Build shared libraries" OFF)
 
 include(FetchContent)
 FetchContent_Declare(SFML
-    GIT_REPOSITORY https://github.com/SFML/SFML.git
-    GIT_TAG 3.0.x
+	GIT_REPOSITORY https://github.com/SFML/SFML.git
+	GIT_TAG 3.0.x
 )
 FetchContent_Declare(ImGUI
 	GIT_REPOSITORY https://github.com/ocornut/imgui.git

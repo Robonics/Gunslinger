@@ -1,15 +1,23 @@
 #pragma once
 
+#include "SFML/Graphics/Texture.hpp"
 #include "SFML/Window/VideoMode.hpp"
 #include "SFML/Window/WindowEnums.hpp"
+#include "arcade_errors.hpp"
 #include "bind.hpp"
+#include "imgui_internal.h"
 #include "level.hpp"
 #include "localizer.hpp"
+#include <filesystem>
+#include <fstream>
 #include <imgui.h>
 #include <imgui-SFML.h>
 #include <SFML/Graphics.hpp>
 #include <functional>
+#include <iostream>
+#include <limits>
 #include <memory>
+#include <sstream>
 #include <stdexcept>
 #include <typeinfo>
 
@@ -52,6 +60,13 @@ namespace Arcade {
 	};
 
 	class Engine {
+
+		constexpr const static uint8_t default_pixels[]{
+			0x00,0x00,0x00,0xFF,	0xC5,0x3D,0xFF,0xFF,
+			0xC5,0x3D,0xFF,0xFF,	0x00,0x00,0x00,0xFF
+		};
+		std::shared_ptr<sf::Texture> default_texture;
+
 		std::string window_name;
 		sf::VideoMode window_mode;
 		sf::RenderWindow window;
@@ -63,10 +78,12 @@ namespace Arcade {
 		static sf::Clock g_time;
 
 		std::unordered_map<std::string, std::unique_ptr<VEventWrapper>> events;
+		std::unordered_map<std::string, std::shared_ptr<sf::Texture>> texture_registry;
+		std::unordered_map<std::string, std::shared_ptr<TileRegistryEntry>> tile_registry;
 
 		bool debug_open{};
 		void debug_imgui() {
-			ImGui::Begin("Event Registries");
+			ImGui::Begin("Engine Registries");
 			if(ImGui::BeginTabBar("EventRegistriesTabBar")) {
 				static ImGuiTableFlags flags = ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_RowBg | ImGuiTableFlags_Borders;
 				if(ImGui::BeginTabItem("Event Registry")) {
@@ -106,6 +123,7 @@ namespace Arcade {
 					ImGui::EndTabItem();
 				}
 				if(ImGui::BeginTabItem("Localization")) {
+					ImGui::Text("Loaded %s", Localizer::getLoadedLanguage().c_str());
 					ImGui::BeginTable("TranslationRegistryTable", 2, flags);
 					ImGui::TableSetupColumn("Key");
 					ImGui::TableSetupColumn("Translation");
@@ -115,9 +133,65 @@ namespace Arcade {
 						ImGui::TableSetColumnIndex(0);
 						ImGui::Text( "'%s'", pair.first.c_str() );
 						ImGui::TableNextColumn();
-						ImGui::Text( "%s", pair.second.c_str() );
+						ImGui::Text( "%s", reinterpret_cast<const char*>(pair.second.c_str()) );
 					}
 					ImGui::EndTable();
+					ImGui::EndTabItem();
+				}
+				if( ImGui::BeginTabItem("Tile Registry") ) {
+					for(auto& [identifier, tile] : tile_registry) {
+						ImGui::Text( "%s", identifier.c_str() );
+						if( ImGui::IsItemHovered() ) {
+							if( ImGui::BeginTooltip() ) {
+								float aspect_ratio = (float)tile->getTexture().lock()->getSize().x / (float)tile->getTexture().lock()->getSize().y;
+								if( aspect_ratio < 1.0f ) { aspect_ratio = 1.0f / aspect_ratio; } 
+								ImGui::Image( *tile->getTexture().lock(), {200.0f * aspect_ratio, 200.0f} );
+								ImGui::EndTooltip();
+							}
+						}
+					}
+					ImGui::EndTabItem();
+				}
+				if( ImGui::BeginTabItem("Texture Registry") ) {
+					ImGui::BeginTable("TextureTable", 5, flags);
+					ImGui::TableSetupColumn("Identifier");
+					ImGui::TableSetupColumn("Size");
+					ImGui::TableSetupColumn("Smooth?");
+					ImGui::TableSetupColumn("Repeated?");
+					ImGui::TableSetupColumn("Map offset");
+					ImGui::TableHeadersRow();
+					for(auto& [identifier, text] : texture_registry ) {
+						ImGui::TableNextRow();
+						ImGui::TableSetColumnIndex(0);
+						ImGui::Text( "%s", identifier.c_str() );
+						if( ImGui::TableGetHoveredRow() == ImGui::TableGetRowIndex() ) {
+							if( ImGui::BeginTooltip() ) {
+								float aspect_ratio = (float)text->getSize().x / (float)text->getSize().y;
+								if( aspect_ratio < 1.0f ) { aspect_ratio = 1.0f / aspect_ratio; } 
+								ImGui::Image( *text, {200.0f * aspect_ratio, 200.0f} );
+								ImGui::EndTooltip();
+							}
+						}
+						ImGui::TableNextColumn();
+						ImGui::TextColored( sf::Color::Cyan, "%ux%u", text->getSize().x, text->getSize().y );
+						ImGui::TableNextColumn();
+						ImGui::TextColored( ((text->isSmooth())?sf::Color::Green:sf::Color::Red), "%s", (text->isSmooth())?"true":"false");
+						ImGui::TableNextColumn();
+						ImGui::TextColored( ((text->isRepeated())?sf::Color::Green:sf::Color::Red), "%s", (text->isRepeated())?"true":"false");
+						ImGui::TableNextColumn();
+						ImGui::TextColored( sf::Color::Magenta, "positioned at %ld", std::distance( texture_registry.begin(), texture_registry.find(identifier)));
+					}
+					ImGui::EndTable();
+					ImGui::EndTabItem();
+				}
+				/// TODO \todo Needs to be fixed. This tab should not be enabled when a level is not loaded!
+				if( ImGui::BeginTabItem("Level") ) {
+					ImGui::Text( "%s ->\n\t%s", level.getName().data(),  reinterpret_cast<const char*>(Localizer::getTranslation(level.getName()).c_str()) );
+					ImGui::Text("World Size: ");
+					ImGui::SameLine();
+					ImGui::TextColored( sf::Color::Magenta, "%ux%u (%u Chunks, %u Tiles)", level.getSize().x, level.getSize().y, level.getSize().x * level.getSize().y, level.getSize().x * level.getSize().y * level.getChunkSize() * level.getChunkSize() );
+					ImGui::Text( "Chunk size: " ); ImGui::SameLine();
+					ImGui::TextColored( sf::Color::Magenta, "%ux%u (%u tiles)", level.getChunkSize(), level.getChunkSize(), level.getChunkSize()*level.getChunkSize() );
 					ImGui::EndTabItem();
 				}
 				ImGui::EndTabBar();
@@ -141,6 +215,79 @@ namespace Arcade {
 			});
 		}
 
+		static void recursive_load( const std::filesystem::path& path, std::function<void( const std::filesystem::path& )> cback, size_t max_depth=std::numeric_limits<size_t>::max(), size_t depth=0 ) {
+			assert( std::filesystem::is_directory(path) );
+			for( const auto& f : std::filesystem::directory_iterator(path) ) {
+				if( f.is_directory() && depth < max_depth ) recursive_load( f, cback, max_depth, depth + 1 );
+				else cback(f);
+			}
+		}
+
+		void load_static_resources() {
+			// Texutres
+			const static std::filesystem::path t_path("../textures");
+			if( std::filesystem::is_directory(t_path) ) {
+				recursive_load( t_path, [this]( auto& f) {
+					this->registerTexture( std::filesystem::relative(f, t_path), f );
+				});
+			}
+
+			const static std::filesystem::path ts_path("../tilesets");
+			if( std::filesystem::is_directory(ts_path) ) {
+				recursive_load(ts_path, [this]( auto& f ) {
+					std::ifstream file(f);
+					if(!file) {
+						std::cerr << "Failed to open file " << std::filesystem::relative(f, ts_path) << "" << std::endl;
+						return;
+					}
+
+					uint64_t magic;
+					file.read((char*)&magic, 8u);
+					magic = be64toh( magic );
+					if( magic != ATSET_MAGIC ) {
+						std::stringstream err;
+						err << "Failed to load tileset because magic was incorrect. Expected ";
+						err << std::hex << ATSET_MAGIC;
+						err << " but got " << std::hex << magic;
+						throw Error<ErrorType::FILE_ERROR>( err.str(), ErrorType::FILE_BAD_MAGIC );
+					}
+				
+					// ATSET is a simple format
+					while( file ) {
+						std::string tile_name;
+						for( char c; file.read(&c, 1u); ) {
+							if(c == '\0') break;
+							tile_name.append( &c, 1u );
+						}
+						// Now the texture, we need the Engine for this.
+						std::string texture_key;
+						for( char c; file.read(&c, 1u) && file; ) {
+							if(c == '\0') break;
+							texture_key.append( &c, 1u );
+						}
+
+						this->registerTile( tile_name, texture_key );
+					}
+				});
+			}
+
+			ImFontConfig cfg;
+			cfg.MergeMode = true;
+			ImGuiIO& io = ImGui::GetIO();
+			io.Fonts->AddFontDefault( &cfg );
+			auto* f = io.Fonts->AddFontFromFileTTF(std::filesystem::absolute("../fonts/NotoSansJP-Regular.ttf").c_str(), 18.0f, &cfg, io.Fonts->GetGlyphRangesJapanese());
+			if( !f->IsLoaded() ) {
+				std::cerr << "\e[33mFailled to load NotoSansJP\e[0m" << std::endl;
+			}
+			if( !io.Fonts->Build() ) {
+				std::cerr << "\e[1;31mError! ImGui font building failed. The program WILL crash\e[0m" << std::endl;
+			}
+			if( !ImGui::SFML::UpdateFontTexture() ) {
+				std::cerr << "\e[1;31mError! ImGui-SFML failed to update the font texture. The program WILL crash\e[0m" << std::endl;
+			}
+			
+		}
+
 	public:
 
 		BindManager bindManager;
@@ -148,12 +295,17 @@ namespace Arcade {
 		Engine( std::string window_title ) : window_name( window_title ) {
 			window_mode.size = window_mode.getDesktopMode().size.componentWiseDiv({2, 2});
 			window.create( window_mode, window_title ); 
+			default_texture = std::make_shared<sf::Texture>();
+			if(default_texture->resize({2u,2u})) {
+				default_texture->update( default_pixels );
+			}
 
 			if( !ImGui::SFML::Init( window ) ) {
 				throw std::runtime_error("Failed to init ImGui!");
 			};
 
 			init_default_events();
+			load_static_resources();
 
 		}
 		Engine( std::string window_title, sf::VideoMode dimensions ) : window_name( window_title ), window_mode( dimensions ), window( dimensions, window_title ) {
@@ -163,6 +315,7 @@ namespace Arcade {
 			};
 
 			init_default_events();
+			load_static_resources();
 		}
 		~Engine() {
 			close();
@@ -225,8 +378,42 @@ namespace Arcade {
 				this->debug_imgui();
 			}
 
+			window.draw( level );
+
 			ImGui::SFML::Render( window );
 			window.display();
+		}
+
+		std::weak_ptr<sf::Texture> getTexture( const std::string& identifier ) {
+			if( texture_registry.find( identifier ) != texture_registry.end() ) {
+				return texture_registry.at( identifier );
+			}
+			return default_texture;
+		}
+		/// Copy texture
+		bool registerTexture( const std::string& identifier, const sf::Texture& copy_from ) {
+			return texture_registry.emplace( identifier, std::make_shared<sf::Texture>( copy_from ) ).second;
+		}
+		/// Filename can be any path on the system
+		bool registerTexture( const std::string& identifier, const std::filesystem::path& filename ) noexcept {
+			auto result = texture_registry.emplace( identifier, std::make_shared<sf::Texture>() );
+			if( result.second ) {
+				return result.first->second->loadFromFile( filename );
+			}
+			return false;
+		}
+
+		bool registerTile( std::string_view identifier, const std::string& texture ) noexcept {
+			return tile_registry.emplace( identifier, std::make_shared<TileRegistryEntry>( getTexture(texture) ) ).second;
+		}
+
+		std::weak_ptr<TileRegistryEntry> getTileEntry( const std::string& entry ) const {
+			if( tile_registry.find(entry) == tile_registry.end() ) {
+				std::stringstream err;
+				err << "Failed to find a tile in the registry with name " << entry;
+				throw Arcade::Error<Arcade::ErrorType::RESOURCE_ERROR>(err.str(), Arcade::ErrorType::RESOURCE_NOT_FOUND);
+			}
+			return tile_registry.at( entry );
 		}
 
 		void close() {
@@ -234,7 +421,21 @@ namespace Arcade {
 			ImGui::SFML::Shutdown();
 		}
 
-		void loadLevel() {
+		void loadLevel( const std::filesystem::path& path ) {
+			level.~Level();
+			std::ifstream file( path );
+			if( file ) {
+				try {
+					level = Level( *this, file );
+					std::cout << "Loaded level " << path << "!";
+				}catch( Error<ErrorType::FILE_ERROR> e ) {
+					std::cerr << "\e[1;31mFailed to load level [" << (int)e.type() << "]: " <<  e.what() << "\e[0m" << std::endl;
+				}catch( Error<ErrorType::ARG_ERROR> e ) {
+					std::cerr << "\e[1;31mFailed to load level [" << (int)e.type() << "]: " <<  e.what() << "\e[0m" << std::endl;
+				}
+			}else {
+				std::cerr << "Failed to open level file" << std::endl;
+			}
 			
 		}
 	};

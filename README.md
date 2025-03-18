@@ -99,7 +99,10 @@ Game-Events are provided by the engine, Here are the different kinds. @todo
 > > `Chunk::Flag::NoCull = 0b00010000`
 > > <br>&emsp;&emsp;&emsp;Tells the engine never to cull this chunk. Usefully for `RenderCamera`, when you need the contents of a chunk to be rendered onto a texture.
 
-> **[$tile\_size*chunk\_size^2$ Bytes] Tile data**
+> **[3+ Bytes] Chunk Dictionary**
+> <br>&emsp;&emsp;&emsp;Is also skipped if `Chunk::Flag::HasTiles` = `0`. Is a dictionary mapping tile numeric IDs to internal tile string identifiers. The first value is a byte containing the number of entries. The chunk dictionary is limited to 256 entries, which is more than enough for a chunk. If you need more, get help. Each entry is an 8-bit number, followed by a C-string. 0 is a valid index, so do not confuse `\0` with `0x00`.
+
+> **[\* Bytes] Tile data**
 > > **[1 Byte] Tile Header**
 > > <br>&emsp;&emsp;&emsp;Works like chunk header. Data for tile compression and metadata.
 > > > `Tile::Flag::Empty = 0b10000000`
@@ -127,6 +130,7 @@ Game-Events are provided by the engine, Here are the different kinds. @todo
 > > > <br>&emsp;&emsp;&emsp;Allows the specification of a custom collision shape. Format is the number of points, followed by two unsigned 4-bit numbers. There must be at least 3 points, and they will wrap clockwise into a collision polygon, which is then used to compute the chunk's collision mesh. (x,y) is measured from the top left. Example:
 > > > <br>&emsp;&emsp;&emsp;`0x01 03 0F F0 FF` **=>** `CollisionShape{(0.0,1.0), (1.0,0.0), (1.0,1.0)}`
 >
-> > **[1+ Bytes] Tile**
-> > <br>&emsp;&emsp;&emsp;The tile's registry name as a string. Reads until a `0x00` is reached.
+> > **[1 Bytes] Tile**
+> > <br>&emsp;&emsp;&emsp;An ID that indexes into the chunks map.
+
 ---
