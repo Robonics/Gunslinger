@@ -4,6 +4,7 @@ Arcade Engine is an engine written in C++, using the following libraries:
 * [Dear ImGui](https://github.com/ocornut/imgui)
 * [ImGui-SFML](https://github.com/SFML/imgui-sfml)
 * [Box2D](https://box2d.org/)
+* [Portable File Dialogs](https://github.com/samhocevar/portable-file-dialogs)
   
 #### Table of Contents
 1) [The Bind Manager](#the-bind-manager)
