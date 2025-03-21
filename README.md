@@ -108,8 +108,8 @@ Game-Events are provided by the engine, Here are the different kinds. @todo
 > > > `Tile::Flag::Empty = 0b10000000`
 > > > <br>&emsp;&emsp;&emsp;Flags this tile to be skipped.
 > >
-> > > `Tile::Flag::UsesNumericID = 0b01000000`
-> > > <br>&emsp;&emsp;&emsp;This should not be used 90% of the time. Using numeric IDs is smaller, but runs the risk of an ID change causing bad mapping. 
+> > > `Tile::Flag::Foreground = 0b01000000`
+> > > <br>&emsp;&emsp;&emsp;This tile renders in the foreground, above all entities.
 > >
 > > > `Tile::Flag::HasData = 0b00100000`
 > > > <br>&emsp;&emsp;&emsp;Indicates that this tile is preceded by a tile data entry. If `0` then we skip the Tile data process. 
