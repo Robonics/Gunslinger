@@ -1,6 +1,8 @@
 #pragma once
 
+#include "SFML/System/Vector2.hpp"
 #include <bitset>
+#include <unordered_map>
 #define ALV_MAGIC 0x00414C56
 #define ATSET_MAGIC 0x004154534554AFAF
 
@@ -26,7 +28,10 @@ namespace Arcade {
 	class TileRegistryEntry {
 		friend class Tile;
 		friend class Chunk;
+		friend class Level;
+		friend class Engine;
 		TileRenderMode r_mode{TileRenderMode::Static};
+		std::string registry_name;
 		std::weak_ptr<sf::Texture> texture;
 
 	public:
@@ -38,6 +43,9 @@ namespace Arcade {
 		const TileRenderMode getRenderMode() {
 			return r_mode;
 		}
+
+		std::string getRegistryName();
+		static const char* RModeString( TileRenderMode m );
 	};
 
 	class Tile : protected sf::Drawable, sf::Transformable {
@@ -50,6 +58,7 @@ namespace Arcade {
 	protected:
 		void setup_texture();
 		virtual void draw(sf::RenderTarget& target, sf::RenderStates states) const override;
+		sf::FloatRect bounds;
 	public:
 
 		enum Flags {
@@ -59,6 +68,8 @@ namespace Arcade {
 			Ghost = 0b00010000,
 			ExcludeCollisionMerge = 0b00001000
 		};
+
+		const sf::FloatRect& getBounds();
 
 		Tile()=delete;
 		Tile( uint8_t flags );
@@ -89,29 +100,53 @@ namespace Arcade {
 
 		Chunk()=default;
 		~Chunk();
-		Tile& getTileAt( size_t i );
-		Tile& getTileAt( unsigned long x, unsigned long y );
+		Tile* getTileAt( sf::Vector2f pos );
 
 		/// This calculates EVERYTHING. Autotile indecies, collison, all of it.
 		/// This should never ever EVER be called regularly. 
 		void doTilePostInit();
 
-		const uint8_t getFlags();
+		const uint8_t getFlags() const;
+		const sf::FloatRect getBounds() const;
+	};
+
+	enum LevelEditorTool {
+		None=0,
+		TileDraw,
+		TileSelect
+	};
+
+	struct Vector2uHash {
+		std::size_t operator()(const sf::Vector2u& v) const noexcept {
+			const uint64_t a = static_cast<uint64_t>(v.x);
+			const uint64_t b = static_cast<uint64_t>(v.y);
+		
+			const uint64_t h0 = (b << 32) | a;
+			const uint64_t h1 = (a << 32) | b;
+		
+			return (v.x < v.y) ? h0 : h1; 
+		}
 	};
 
 	class Level : public sf::Drawable {
+		friend class Engine;
+
+		bool editor_open{};
+
 		std::string tl_key;
 		sf::Vector2u world_size;
 		uint32_t chunk_size;
-		std::vector<Chunk> chunks;
+		std::unordered_map<sf::Vector2u, Chunk, Vector2uHash> chunks;
 	protected:
 		virtual void draw(sf::RenderTarget& target, sf::RenderStates states) const override;
+		void drawEditor(  Arcade::Engine& engine  );
 	
 	public:
 		Level() = default;
 		Level( Arcade::Engine&, std::ifstream& file );
 		~Level();
 	
+		void save( const std::filesystem::path& path ) const;
 		void unload();
 		void load( Arcade::Engine&, std::ifstream& file );
 		void load( Arcade::Engine&, const std::string& filename );
@@ -119,5 +154,9 @@ namespace Arcade {
 		const std::string& getName();
 		const sf::Vector2u getSize();
 		const uint32_t getChunkSize();
+
+		Chunk* getChunkAt(sf::Vector2f pos);
+		Tile* getTileAt(sf::Vector2f pos);
+
 	};
 };

@@ -155,25 +155,25 @@ namespace Arcade {
 			return nullptr;
 		}
 
-		bool isPressed( std::string name ) noexcept {
+		[[nodiscard]] bool isPressed( std::string name ) noexcept {
 			if( binds.find(name) != binds.end() ) {
 				return binds.at( name ).isPressed();
 			}
 			return false;
 		}
-		bool startedPressing( std::string name ) noexcept {
+		[[nodiscard]] bool startedPressing( std::string name ) noexcept {
 			if( binds.find(name) != binds.end() ) {
 				return binds.at( name ).startedPressing();
 			}
 			return false;
 		}
-		bool endedPressing( std::string name ) noexcept {
+		[[nodiscard]] bool endedPressing( std::string name ) noexcept {
 			if( binds.find(name) != binds.end() ) {
 				return binds.at( name ).endedPressing();
 			}
 			return false;
 		}
-		sf::Time getTimePressed( std::string name ) noexcept {
+		[[nodiscard]] sf::Time getTimePressed( std::string name ) noexcept {
 			if( binds.find(name) != binds.end() ) {
 				return binds.at( name ).getTimePressed();
 			}

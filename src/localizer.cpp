@@ -8,9 +8,7 @@
 std::unordered_map<std::string, std::u8string> Localizer::keys;
 std::string Localizer::loaded_lang{};
 void Localizer::load( std::ifstream& file ) {
-	std::cout << "loading" << std::endl;
 	for( std::string line; std::getline( file, line ); ) {
-		std::cout << line << std::endl;
 		auto i = line.find(',');
 		std::string k = line.substr(0, i);
 		std::string v =  line.substr( i + 1 );

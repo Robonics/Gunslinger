@@ -60,6 +60,7 @@ namespace Arcade {
 	};
 
 	class Engine {
+		friend class Level;
 
 		constexpr const static uint8_t default_pixels[]{
 			0x00,0x00,0x00,0xFF,	0xC5,0x3D,0xFF,0xFF,
@@ -76,6 +77,8 @@ namespace Arcade {
 		bool fullscreen = false;
 
 		static sf::Clock g_time;
+		sf::Time frame_time;
+		sf::View camera;
 
 		std::unordered_map<std::string, std::unique_ptr<VEventWrapper>> events;
 		std::unordered_map<std::string, std::shared_ptr<sf::Texture>> texture_registry;
@@ -192,6 +195,9 @@ namespace Arcade {
 					ImGui::TextColored( sf::Color::Magenta, "%ux%u (%u Chunks, %u Tiles)", level.getSize().x, level.getSize().y, level.getSize().x * level.getSize().y, level.getSize().x * level.getSize().y * level.getChunkSize() * level.getChunkSize() );
 					ImGui::Text( "Chunk size: " ); ImGui::SameLine();
 					ImGui::TextColored( sf::Color::Magenta, "%ux%u (%u tiles)", level.getChunkSize(), level.getChunkSize(), level.getChunkSize()*level.getChunkSize() );
+					ImGui::Spacing();
+					ImGui::Text("Engine Camera: %f, %f %fx%f", camera.getCenter().x, camera.getCenter().y, camera.getSize().x, camera.getSize().y);
+					ImGui::Text("Window Camera: %f, %f %fx%f", window.getView().getCenter().x, window.getView().getCenter().y, window.getView().getSize().x, window.getView().getSize().y);
 					ImGui::EndTabItem();
 				}
 				ImGui::EndTabBar();
@@ -301,6 +307,8 @@ namespace Arcade {
 		Engine( std::string window_title ) : window_name( window_title ) {
 			window_mode.size = window_mode.getDesktopMode().size.componentWiseDiv({2, 2});
 			window.create( window_mode, window_title ); 
+			camera = window.getView();
+
 			default_texture = std::make_shared<sf::Texture>();
 			if(default_texture->resize({2u,2u})) {
 				default_texture->update( default_pixels );
@@ -314,7 +322,11 @@ namespace Arcade {
 			load_static_resources();
 
 		}
-		Engine( std::string window_title, sf::VideoMode dimensions ) : window_name( window_title ), window_mode( dimensions ), window( dimensions, window_title ) {
+		Engine( std::string window_title, sf::VideoMode dimensions ) : 
+			window_name( window_title ),
+			window_mode( dimensions ),
+			window( dimensions, window_title ),
+			camera( window.getView() ) {
 
 			if( !ImGui::SFML::Init( window ) ) {
 				throw std::runtime_error("Failed to init ImGui!");
@@ -327,7 +339,7 @@ namespace Arcade {
 			close();
 		}
 
-		const sf::RenderWindow& getWindow() {
+		sf::RenderWindow& getWindow() {
 			return this->window;
 		}
 
@@ -371,11 +383,14 @@ namespace Arcade {
 		}
 
 		void update( sf::Time delta ) {
+			frame_time = delta;
 			ImGui::SFML::Update( window, delta );
 		}
 
 		void render() {
 			window.clear();
+
+			window.draw( level );
 
 			if( bindManager.startedPressing("Meta:Debug") ) {
 				debug_open = !debug_open;
@@ -383,10 +398,16 @@ namespace Arcade {
 			if( debug_open ) {
 				this->debug_imgui();
 			}
-
-			window.draw( level );
+			if( bindManager.startedPressing("Meta:Editor") ) {
+				level.editor_open = !level.editor_open;
+			}
+			if( level.editor_open ) {
+				level.drawEditor( *this );
+			}
 
 			ImGui::SFML::Render( window );
+		}
+		void display() {
 			window.display();
 		}
 
@@ -410,7 +431,9 @@ namespace Arcade {
 		}
 
 		bool registerTile( std::string_view identifier, const std::string& texture, TileRenderMode r_mode=TileRenderMode::Static ) noexcept {
-			return tile_registry.emplace( identifier, std::make_shared<TileRegistryEntry>( getTexture(texture), r_mode ) ).second;
+			auto t = tile_registry.emplace( identifier, std::make_shared<TileRegistryEntry>( getTexture(texture), r_mode ) );
+			if( t.second ) { t.first->second->registry_name = identifier; }
+			return t.second;
 		}
 
 		std::weak_ptr<TileRegistryEntry> getTileEntry( const std::string& entry ) const {
@@ -420,6 +443,17 @@ namespace Arcade {
 				throw Arcade::Error<Arcade::ErrorType::RESOURCE_ERROR>(err.str(), Arcade::ErrorType::RESOURCE_NOT_FOUND);
 			}
 			return tile_registry.at( entry );
+		}
+
+		sf::View& getCamera() {
+			return this->camera;
+		}
+		void updateCamera() {
+			this->window.setView( this->camera );
+		}
+
+		const sf::Time& getFrameTime() {
+			return this->frame_time;
 		}
 
 		void close() {
@@ -433,7 +467,7 @@ namespace Arcade {
 			if( file ) {
 				try {
 					level = Level( *this, file );
-					std::cout << "Loaded level " << path << "!";
+					std::cout << "Loaded level " << path << "!" << std::endl;
 				}catch( Error<ErrorType::FILE_ERROR> e ) {
 					std::cerr << "\e[1;31mFailed to load level [" << (int)e.type() << "]: " <<  e.what() << "\e[0m" << std::endl;
 				}catch( Error<ErrorType::ARG_ERROR> e ) {
@@ -443,6 +477,10 @@ namespace Arcade {
 				std::cerr << "Failed to open level file" << std::endl;
 			}
 			
+		}
+
+		Level& getLevel() {
+			return level;
 		}
 	};
 

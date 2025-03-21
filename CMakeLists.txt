@@ -30,7 +30,6 @@ set(IMGUI_SFML_FIND_SFML OFF)
 
 set(IMGUI_DIR ${imgui_SOURCE_DIR})
 FetchContent_MakeAvailable(ImGUI_SFML)
-
 if(DEFINED DEBUG)
 	add_compile_options(-g -fstandalone-debug)
 	add_link_options(-g)
