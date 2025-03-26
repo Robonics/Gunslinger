@@ -1,5 +1,6 @@
 #include "include/level.hpp"
 #include <box2d/box2d.h>
+#include "box2d/types.h"
 #include "imgui.h"
 #include "include/engine.hpp"
 #include "SFML/Graphics/RenderStates.hpp"
@@ -147,7 +148,7 @@ Arcade::Tile* Arcade::Chunk::getTileAt( sf::Vector2f pos ) {
 	}
 }
 
-void Arcade::Chunk::doTilePostInit( Engine& engine ) {
+void Arcade::Chunk::doTilePostInit( Engine& engine, b2BodyId body ) {
 	edges.clear();
 	for( size_t i = 0; i < tiles.size(); i++ ) {
 		size_t x = i % size;
@@ -211,42 +212,42 @@ void Arcade::Chunk::doTilePostInit( Engine& engine ) {
 
 		if(!tiles[i].g_neighbor.test(0)) {
 			edges.emplaceEdge(sf::Vector2f{
-				(x * TILE_SIZE),
-				(y * TILE_SIZE)
+				tiles[i].bounds.position.x,
+				tiles[i].bounds.position.y
 			},
 			sf::Vector2f{
-				(x * TILE_SIZE) + TILE_SIZE,
-				(y * TILE_SIZE)
+				tiles[i].bounds.position.x + TILE_SIZE,
+				tiles[i].bounds.position.y
 			});
 		}
 		if(!tiles[i].g_neighbor.test(1)) {{
 			edges.emplaceEdge(sf::Vector2f{
-				(x * TILE_SIZE) + TILE_SIZE,
-				(y * TILE_SIZE)
+				tiles[i].bounds.position.x + TILE_SIZE,
+				tiles[i].bounds.position.y
 			},
 			sf::Vector2f{
-				(x * TILE_SIZE) + TILE_SIZE,
-				(y * TILE_SIZE) + TILE_SIZE
+				tiles[i].bounds.position.x + TILE_SIZE,
+				tiles[i].bounds.position.y + TILE_SIZE
 			});
 		}}
 		if(!tiles[i].g_neighbor.test(2)) {
 			edges.emplaceEdge(sf::Vector2f{
-				(x * TILE_SIZE) + TILE_SIZE,
-				(y * TILE_SIZE) + TILE_SIZE
+				tiles[i].bounds.position.x + TILE_SIZE,
+				tiles[i].bounds.position.y + TILE_SIZE
 			},
 			sf::Vector2f{
-				(x * TILE_SIZE),
-				(y * TILE_SIZE) + TILE_SIZE
+				tiles[i].bounds.position.x,
+				tiles[i].bounds.position.y + TILE_SIZE
 			});
 		}
 		if(!tiles[i].g_neighbor.test(3)) {
 			edges.emplaceEdge(sf::Vector2f{
-				(x * TILE_SIZE),
-				(y * TILE_SIZE) + TILE_SIZE
+				tiles[i].bounds.position.x,
+				tiles[i].bounds.position.y + TILE_SIZE
 			},
 			sf::Vector2f{
-				(x * TILE_SIZE),
-				(y * TILE_SIZE)
+				tiles[i].bounds.position.x,
+				tiles[i].bounds.position.y
 			});
 		}
 	}
@@ -254,14 +255,8 @@ void Arcade::Chunk::doTilePostInit( Engine& engine ) {
 	b2BodyDef def = b2DefaultBodyDef();
 	def.position = b2Vec2{ bounds.position.x, bounds.position.y };
 
-	if( b2Body_IsValid( ground ) ) {
-		// If we re-init the chunk, destroy the old bodys
-		b2DestroyBody( ground );
-	}
-	ground = b2CreateBody( engine.getWorld(), &def );
-
 	auto lists = edges.getShapes();
-	edges.attachChainShapes( ground );
+	edges.attachChainShapes( body, this->chains );
 }
 const uint8_t Arcade::Chunk::getFlags() const {
 	return this->flags;
@@ -285,6 +280,13 @@ void Arcade::Level::draw(sf::RenderTarget& target, sf::RenderStates states) cons
 
 // .alv is stored as BIG ENDIAN always.
 void Arcade::Level::load( Arcade::Engine& engine, std::ifstream& file ) {
+	if( b2Body_IsValid( this->ground ) ) {
+		// If we re-init the chunk, destroy the old bodys
+		b2DestroyBody( this->ground );
+	}
+	b2BodyDef def = b2DefaultBodyDef();
+	this->ground = b2CreateBody(engine.getWorld(), &def);
+
 	// Alright, first let's check on the status of the ifstream
 	if(!file.good()) throw Error<ErrorType::FILE_ERROR>("File is bad");
 	
@@ -379,7 +381,7 @@ void Arcade::Level::load( Arcade::Engine& engine, std::ifstream& file ) {
 			}
 		}
 
-		chunk.doTilePostInit( engine );
+		chunk.doTilePostInit( engine, this->ground );
 
 	}
 }
@@ -679,11 +681,11 @@ void Arcade::Level::drawEditor( Arcade::Engine& engine ) {
 					if( engine.bindManager.startedPressing("Editor:Tool:Primary") && !selected_tile_entry.empty() ) {
 						tile->flags &= ~Tile::Flags::Empty;
 						tile->registryObject = engine.getTileEntry( selected_tile_entry );
-						chunk->doTilePostInit( engine );
+						chunk->doTilePostInit( engine, this->ground );
 					}else if ( engine.bindManager.startedPressing("Editor:Tool:Secondary") && !selected_tile_entry.empty()  ) {
 						tile->flags |= Tile::Flags::Empty;
 						tile->registryObject.reset();
-						chunk->doTilePostInit( engine );
+						chunk->doTilePostInit( engine, this->ground );
 					}
 				}
 			}

@@ -174,7 +174,7 @@ public:
 		}
 		return collisions;
 	}
-	void attachChainShapes( b2BodyId body ) {
+	void attachChainShapes( b2BodyId body, std::vector<b2ChainId>& chains ) {
 		static_assert(std::is_floating_point_v<T>, "EdgeBuffer::getChainShapes() is only supported for floating point types");
 		for( auto& shape : shapes ) {
 			b2ChainDef chain = b2DefaultChainDef();
@@ -186,7 +186,7 @@ public:
 			chain.count = shape.size();
 			chain.isLoop = true;
 
-			b2CreateChain( body, &chain );
+			chains.push_back(b2CreateChain( body, &chain ));
 		}
 	}
 	std::vector<sf::ConvexShape> getConvexShapes() {

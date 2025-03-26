@@ -2,6 +2,7 @@
 
 #include <box2d/box2d.h>
 #include "SFML/System/Vector2.hpp"
+#include "box2d/id.h"
 #include "edge_buffer.hpp"
 #include <bitset>
 #include <unordered_map>
@@ -102,7 +103,7 @@ namespace Arcade {
 		};
 
 		EdgeBuffer<float> edges;
-		b2BodyId ground;
+		std::vector<b2ChainId> chains;
 
 		Chunk()=default;
 		~Chunk();
@@ -110,7 +111,7 @@ namespace Arcade {
 
 		/// This calculates EVERYTHING. Autotile indecies, collison, all of it.
 		/// This should never ever EVER be called regularly. 
-		void doTilePostInit( Engine& engine );
+		void doTilePostInit( Engine& engine, b2BodyId body );
 
 		const uint8_t getFlags() const;
 		const sf::FloatRect getBounds() const;
@@ -136,6 +137,7 @@ namespace Arcade {
 
 	class Level : public sf::Drawable {
 		friend class Engine;
+		friend class Chunk;
 
 		bool editor_open{};
 
@@ -143,7 +145,9 @@ namespace Arcade {
 		sf::Vector2u world_size;
 		uint32_t chunk_size;
 		std::unordered_map<sf::Vector2u, Chunk, Vector2uHash> chunks;
+
 	protected:
+		b2BodyId ground;
 		virtual void draw(sf::RenderTarget& target, sf::RenderStates states) const override;
 		void resize( uint32_t x, uint32_t y );
 		void drawEditor(  Arcade::Engine& engine  );

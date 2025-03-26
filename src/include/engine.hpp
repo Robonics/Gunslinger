@@ -23,22 +23,6 @@
 #include <stdexcept>
 #include <typeinfo>
 
-const inline static struct b2WorldDef DEFAULT_WORLD = {
-	.gravity = b2Vec2(0.0f, 20.0f),
-	.restitutionThreshold = 1.0f * b2GetLengthUnitsPerMeter(),
-	.hitEventThreshold = 1.0f * b2GetLengthUnitsPerMeter(),
-	.contactHertz = 30.0,
-	.contactDampingRatio = 10.0f,
-	.contactPushMaxSpeed = 3.0f * b2GetLengthUnitsPerMeter(),
-	.jointHertz = 60.0,
-	.jointDampingRatio = 2.0f,
-	// 400 meters per second, faster than the speed of sound
-	.maximumLinearSpeed = 400.0f * b2GetLengthUnitsPerMeter(),
-	.enableSleep = true,
-	.enableContinuous = true,
-	.internalValue = 1152023 /* Secret Cookie... */
-};
-
 inline sf::Vector2f toSFMLVector( ImVec2 v ) {
 	return sf::Vector2f{v.x, v.y};
 }
@@ -85,6 +69,23 @@ namespace Arcade {
 	};
 
 	class Engine {
+		static b2WorldDef get_default_world() {
+			return b2WorldDef{
+				.gravity = b2Vec2(0.0f, 20.0f),
+				.restitutionThreshold = 1.0f * b2GetLengthUnitsPerMeter(),
+				.hitEventThreshold = 1.0f * b2GetLengthUnitsPerMeter(),
+				.contactHertz = 30.0,
+				.contactDampingRatio = 10.0f,
+				.contactPushMaxSpeed = 3.0f * b2GetLengthUnitsPerMeter(),
+				.jointHertz = 60.0,
+				.jointDampingRatio = 2.0f,
+				// 400 meters per second, faster than the speed of sound
+				.maximumLinearSpeed = 400.0f * b2GetLengthUnitsPerMeter(),
+				.enableSleep = true,
+				.enableContinuous = true,
+				.internalValue = 1152023 /* Secret Cookie... */
+			};
+		}
 		friend class Level;
 
 		constexpr const static uint8_t default_pixels[]{
@@ -332,7 +333,9 @@ namespace Arcade {
 		BindManager bindManager;
 
 		Engine( std::string window_title ) : window_name( window_title ) {
-			world = b2CreateWorld(&DEFAULT_WORLD);
+			b2SetLengthUnitsPerMeter( 10.f );
+			b2WorldDef def = get_default_world();
+			world = b2CreateWorld( &def );
 			window_mode.size = window_mode.getDesktopMode().size.componentWiseDiv({2, 2});
 			window.create( window_mode, window_title ); 
 			camera = window.getView();
@@ -355,7 +358,9 @@ namespace Arcade {
 			window_mode( dimensions ),
 			window( dimensions, window_title ),
 			camera( window.getView() ) {
-			world = b2CreateWorld( &DEFAULT_WORLD );
+			b2SetLengthUnitsPerMeter( 10.f );
+			b2WorldDef def = get_default_world();
+			world = b2CreateWorld( &def );
 
 			if( !ImGui::SFML::Init( window ) ) {
 				throw std::runtime_error("Failed to init ImGui!");
