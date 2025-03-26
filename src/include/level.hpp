@@ -1,6 +1,8 @@
 #pragma once
 
+#include <box2d/box2d.h>
 #include "SFML/System/Vector2.hpp"
+#include "edge_buffer.hpp"
 #include <bitset>
 #include <unordered_map>
 #define ALV_MAGIC 0x00414C56
@@ -52,6 +54,7 @@ namespace Arcade {
 		friend class Chunk;
 		friend class Level;
 		std::bitset<4> neighbor;
+		std::bitset<4> g_neighbor;
 		uint8_t flags{};
 		std::weak_ptr<TileRegistryEntry> registryObject;
 		sf::RectangleShape shape;
@@ -86,7 +89,7 @@ namespace Arcade {
 		sf::FloatRect bounds;
 
 		uint8_t flags;
-		uint32_t size;
+		uint32_t size{1};
 		std::vector<Tile> tiles;
 	protected:
 		virtual void draw(sf::RenderTarget& target, sf::RenderStates states) const override;
@@ -98,13 +101,16 @@ namespace Arcade {
 			NoCull = 0b00010000
 		};
 
+		EdgeBuffer<float> edges;
+		b2BodyId ground;
+
 		Chunk()=default;
 		~Chunk();
 		Tile* getTileAt( sf::Vector2f pos );
 
 		/// This calculates EVERYTHING. Autotile indecies, collison, all of it.
 		/// This should never ever EVER be called regularly. 
-		void doTilePostInit();
+		void doTilePostInit( Engine& engine );
 
 		const uint8_t getFlags() const;
 		const sf::FloatRect getBounds() const;
@@ -139,8 +145,8 @@ namespace Arcade {
 		std::unordered_map<sf::Vector2u, Chunk, Vector2uHash> chunks;
 	protected:
 		virtual void draw(sf::RenderTarget& target, sf::RenderStates states) const override;
+		void resize( uint32_t x, uint32_t y );
 		void drawEditor(  Arcade::Engine& engine  );
-	
 	public:
 		Level() = default;
 		Level( Arcade::Engine&, std::ifstream& file );

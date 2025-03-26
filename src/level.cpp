@@ -1,4 +1,5 @@
 #include "include/level.hpp"
+#include <box2d/box2d.h>
 #include "imgui.h"
 #include "include/engine.hpp"
 #include "SFML/Graphics/RenderStates.hpp"
@@ -22,6 +23,7 @@
 #include <netinet/in.h>
 #include <sstream>
 #include <stdexcept>
+#include <unordered_map>
 
 #if defined(__linux__)
 #  include <endian.h>
@@ -34,7 +36,7 @@
 #  define be64toh(x) betoh64(x)
 #endif
 
-#define TILE_SIZE 60.0f
+#define TILE_SIZE 5.f
 
 using Arcade::Error;
 
@@ -137,10 +139,16 @@ Arcade::Tile* Arcade::Chunk::getTileAt( sf::Vector2f pos ) {
 	size_t x = std::floor( (pos.x - this->bounds.position.x) / TILE_SIZE );
 	size_t y = std::floor( (pos.y - this->bounds.position.y) / TILE_SIZE );
 	if( x<0||x>=size||y<0||y>=size) return nullptr;
-	return &tiles.at( y * size + x );
+	try {
+		return &tiles.at( y * size + x );
+	}catch( std::out_of_range e ) {
+		std::cout << "Failed to get Tile." << x << ", " << y << " size is " << tiles.size() << std::endl;
+		return nullptr;
+	}
 }
 
-void Arcade::Chunk::doTilePostInit() {
+void Arcade::Chunk::doTilePostInit( Engine& engine ) {
+	edges.clear();
 	for( size_t i = 0; i < tiles.size(); i++ ) {
 		size_t x = i % size;
 		size_t y = i / size;
@@ -163,12 +171,18 @@ void Arcade::Chunk::doTilePostInit() {
 					==
 				tiles[i].registryObject.lock()
 			);
+			tiles[i].g_neighbor.set( 0u,
+				!(tiles[((y-1) * size) + x].flags & Tile::Flags::Empty)
+			);
 		}
 		if( x != size-1 ) { // Right
 			tiles[i].neighbor.set( 1u,
 				tiles[(y * size) + (x+1)].registryObject.lock()
 				==
 				tiles[i].registryObject.lock()
+			);
+			tiles[i].g_neighbor.set( 1u,
+				!(tiles[(y * size) + (x+1)].flags & Tile::Flags::Empty)
 			);
 		}
 		if( y != size-1 ) { // Bottom
@@ -177,6 +191,9 @@ void Arcade::Chunk::doTilePostInit() {
 				==
 				tiles[i].registryObject.lock()
 			);
+			tiles[i].g_neighbor.set( 2u,
+				!(tiles[((y+1) * size) + x].flags & Tile::Flags::Empty)
+			);
 		}
 		if( x != 0 ) { // Left
 			tiles[i].neighbor.set( 3u,
@@ -184,11 +201,67 @@ void Arcade::Chunk::doTilePostInit() {
 				==
 				tiles[i].registryObject.lock()
 			);
+			tiles[i].g_neighbor.set( 3u,
+				!(tiles[(y*size) + (x-1)].flags & Tile::Flags::Empty)
+			);
 		}
 
 		tiles[i].setup_texture();
 
+
+		if(!tiles[i].g_neighbor.test(0)) {
+			edges.emplaceEdge(sf::Vector2f{
+				(x * TILE_SIZE),
+				(y * TILE_SIZE)
+			},
+			sf::Vector2f{
+				(x * TILE_SIZE) + TILE_SIZE,
+				(y * TILE_SIZE)
+			});
+		}
+		if(!tiles[i].g_neighbor.test(1)) {{
+			edges.emplaceEdge(sf::Vector2f{
+				(x * TILE_SIZE) + TILE_SIZE,
+				(y * TILE_SIZE)
+			},
+			sf::Vector2f{
+				(x * TILE_SIZE) + TILE_SIZE,
+				(y * TILE_SIZE) + TILE_SIZE
+			});
+		}}
+		if(!tiles[i].g_neighbor.test(2)) {
+			edges.emplaceEdge(sf::Vector2f{
+				(x * TILE_SIZE) + TILE_SIZE,
+				(y * TILE_SIZE) + TILE_SIZE
+			},
+			sf::Vector2f{
+				(x * TILE_SIZE),
+				(y * TILE_SIZE) + TILE_SIZE
+			});
+		}
+		if(!tiles[i].g_neighbor.test(3)) {
+			edges.emplaceEdge(sf::Vector2f{
+				(x * TILE_SIZE),
+				(y * TILE_SIZE) + TILE_SIZE
+			},
+			sf::Vector2f{
+				(x * TILE_SIZE),
+				(y * TILE_SIZE)
+			});
+		}
 	}
+
+	b2BodyDef def = b2DefaultBodyDef();
+	def.position = b2Vec2{ bounds.position.x, bounds.position.y };
+
+	if( b2Body_IsValid( ground ) ) {
+		// If we re-init the chunk, destroy the old bodys
+		b2DestroyBody( ground );
+	}
+	ground = b2CreateBody( engine.getWorld(), &def );
+
+	auto lists = edges.getShapes();
+	edges.attachChainShapes( ground );
 }
 const uint8_t Arcade::Chunk::getFlags() const {
 	return this->flags;
@@ -306,7 +379,7 @@ void Arcade::Level::load( Arcade::Engine& engine, std::ifstream& file ) {
 			}
 		}
 
-		chunk.doTilePostInit();
+		chunk.doTilePostInit( engine );
 
 	}
 }
@@ -324,7 +397,7 @@ void Arcade::Level::unload() {
 }
 
 void Arcade::Level::save( const std::filesystem::path& path ) const {
-	std::ofstream file( path, std::ios::binary | std::ios::trunc );
+	std::ofstream file( path, std::ios::binary | std::ios::trunc | std::ios::out );
 	if( file ) {
 		uint32_t magic = htobe32(ALV_MAGIC);
 		file.write((char*)&magic, 4u);
@@ -337,7 +410,19 @@ void Arcade::Level::save( const std::filesystem::path& path ) const {
 		uint32_t c_size = htobe32(chunk_size);
 		file.write((char*)&c_size, 4u);
 
-		for( auto [k, c] : chunks ) {
+		std::vector<const std::pair<const sf::Vector2u, Chunk>*> sortedChunks;
+		for( const auto& pair : this->chunks ) {
+			sortedChunks.push_back( &pair );
+		}
+
+		std::sort( sortedChunks.begin(), sortedChunks.end(), [this]( const auto* a, const auto* b ) {
+			uint32_t indexA = a->first.y * this->world_size.x + a->first.x;
+			uint32_t indexB = b->first.y * this->world_size.x + b->first.x;
+			return indexA < indexB;
+		});
+
+		for( auto chunk : sortedChunks ) {
+			auto [k, c] = *chunk;
 			file.write( (char*)&c.flags, 1u );
 			if( !(c.flags & Chunk::Flags::HasTiles) ) continue;
 
@@ -383,7 +468,71 @@ void Arcade::Level::save( const std::filesystem::path& path ) const {
 	}
 }
 
+void Arcade::Level::resize( uint32_t target_x, uint32_t target_y ) {
+	// Here we erase any chunks that are outside our target size
+	for( auto& [ coord, chunk ] : chunks ) {
+		if( coord.x >= target_x || coord.y >= target_y ) {
+			chunks.erase( coord );
+		}
+	}
+
+	for( uint32_t x = 0; x < target_x; x++ ) {
+		for( uint32_t y = 0; y < target_y; y++ ) {
+			// If we don't have a chunk at this position, make one
+			if( chunks.find(sf::Vector2u{x, y}) == chunks.end() ) {
+				auto& chunk = chunks.try_emplace(sf::Vector2u{x, y}).first->second;
+				chunk.size = this->chunk_size;
+				chunk.flags = Chunk::Flags::HasTiles;
+				chunk.bounds = sf::FloatRect{
+					{ x*this->chunk_size*TILE_SIZE,y*this->chunk_size*TILE_SIZE },
+					{ TILE_SIZE*this->chunk_size, TILE_SIZE*this->chunk_size }
+				};
+				// Populate it with empty tiles
+				for(uint32_t i = 0; i < this->chunk_size*this->chunk_size; i++) {
+					chunk.tiles.emplace_back( Tile::Flags::Empty );
+				}
+			}
+		}
+	}
+
+	this->world_size.x = target_x;
+	this->world_size.y = target_y;
+}
+
 void Arcade::Level::drawEditor( Arcade::Engine& engine ) {
+
+	ImGui::Begin("Chunk Debugger");
+
+	for( const auto& [k, chunk] : chunks ) {
+		ImGui::PushID( k.y * world_size.x + k.x );
+
+		if( ImGui::TreeNode("", "Chunk (%d, %d)", k.x, k.y) ) {
+
+			ImGui::TextColored( sf::Color::Magenta, "Size %dx%d", chunk.size, chunk.size );
+			ImGui::TextColored( sf::Color::Cyan, "(%f, %f) %fx%f", chunk.bounds.position.x, chunk.bounds.position.y, chunk.bounds.size.x, chunk.bounds.size.y );
+			ImGui::TextColored( sf::Color::Cyan, "(Flags 0x%X", chunk.flags );
+			ImGui::TextColored( sf::Color::Magenta, "#tiles: %zu", chunk.tiles.size() );
+			// ImGui::TextColored( sf::Color::Magenta, "#shapes: %zu", chunk.shapes.size() );
+
+			// for( size_t i = 0; i < chunk.shapes.size(); i++ ) {
+			// 	ImGui::PushID( &(chunk.shapes[i]) );
+			// 	std::string s;
+			// 	sprintf( s.data(), "Shape %zu", i );
+			// 	ImGui::SeparatorText( s.c_str() );
+			// 	for( size_t i2 = 0; i2 < chunk.shapes[i].m_count; i2++ ) {
+			// 		const auto& p = chunk.shapes[i].m_vertices[i2];
+			// 		ImGui::Text("Point %zu: (%f, %f)", i2, p.x, p.y);
+			// 	}
+			// 	ImGui::PopID();
+			// }
+
+			ImGui::TreePop();
+		}
+
+		ImGui::PopID();
+	}
+
+	ImGui::End();
 
 	static sf::RectangleShape shape(sf::Vector2f({TILE_SIZE, TILE_SIZE}));
 	shape.setFillColor( sf::Color::Transparent );
@@ -436,10 +585,8 @@ void Arcade::Level::drawEditor( Arcade::Engine& engine ) {
 		ImGui::InputInt2("##1", resize_target);
 		ImGui::Text("Chunk Size: ");
 		ImGui::SameLine();
-		static int chunk_target = 0;
-		ImGui::InputInt( "##2", &chunk_target );
 		if( ImGui::Button("Resize") ) {
-			// Resize Logic Here
+			resize( resize_target[0], resize_target[1] );
 		}
 		ImGui::EndPopup();
 	}
@@ -532,11 +679,11 @@ void Arcade::Level::drawEditor( Arcade::Engine& engine ) {
 					if( engine.bindManager.startedPressing("Editor:Tool:Primary") && !selected_tile_entry.empty() ) {
 						tile->flags &= ~Tile::Flags::Empty;
 						tile->registryObject = engine.getTileEntry( selected_tile_entry );
-						chunk->doTilePostInit();
+						chunk->doTilePostInit( engine );
 					}else if ( engine.bindManager.startedPressing("Editor:Tool:Secondary") && !selected_tile_entry.empty()  ) {
 						tile->flags |= Tile::Flags::Empty;
 						tile->registryObject.reset();
-						chunk->doTilePostInit();
+						chunk->doTilePostInit( engine );
 					}
 				}
 			}
@@ -587,9 +734,14 @@ Arcade::Chunk* Arcade::Level::getChunkAt( sf::Vector2f pos ) {
 	if( x < 0 || x >= world_size.x || y < 0 || y >= world_size.y )
 		return nullptr;
 
-	return &chunks.at(sf::Vector2u{
-		static_cast<unsigned int>(x), static_cast<unsigned int>(y)
-	});
+	try {
+		return &chunks.at(sf::Vector2u{
+			static_cast<unsigned int>(x), static_cast<unsigned int>(y)
+		});
+	}catch( std::out_of_range e ) {
+		std::cout << "Failed to get chunk." << x << ", " << y << " size is " << chunks.size() << std::endl;
+		return nullptr;
+	}
 }
 Arcade::Tile* Arcade::Level::getTileAt( sf::Vector2f pos ) {
 	Chunk* chunk = this->getChunkAt( pos );

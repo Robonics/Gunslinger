@@ -1,18 +1,20 @@
 #pragma once
 
-#include "SFML/Graphics/Texture.hpp"
-#include "SFML/Window/VideoMode.hpp"
-#include "SFML/Window/WindowEnums.hpp"
+#include <box2d/box2d.h>
 #include "arcade_errors.hpp"
 #include "bind.hpp"
+#include "box2d/math_functions.h"
+#include "box2d/types.h"
 #include "imgui_internal.h"
 #include "level.hpp"
 #include "localizer.hpp"
-#include <filesystem>
-#include <fstream>
+
 #include <imgui.h>
 #include <imgui-SFML.h>
 #include <SFML/Graphics.hpp>
+
+#include <fstream>
+#include <filesystem>
 #include <functional>
 #include <iostream>
 #include <limits>
@@ -20,6 +22,29 @@
 #include <sstream>
 #include <stdexcept>
 #include <typeinfo>
+
+const inline static struct b2WorldDef DEFAULT_WORLD = {
+	.gravity = b2Vec2(0.0f, 20.0f),
+	.restitutionThreshold = 1.0f * b2GetLengthUnitsPerMeter(),
+	.hitEventThreshold = 1.0f * b2GetLengthUnitsPerMeter(),
+	.contactHertz = 30.0,
+	.contactDampingRatio = 10.0f,
+	.contactPushMaxSpeed = 3.0f * b2GetLengthUnitsPerMeter(),
+	.jointHertz = 60.0,
+	.jointDampingRatio = 2.0f,
+	// 400 meters per second, faster than the speed of sound
+	.maximumLinearSpeed = 400.0f * b2GetLengthUnitsPerMeter(),
+	.enableSleep = true,
+	.enableContinuous = true,
+	.internalValue = 1152023 /* Secret Cookie... */
+};
+
+inline sf::Vector2f toSFMLVector( ImVec2 v ) {
+	return sf::Vector2f{v.x, v.y};
+}
+inline sf::Vector2f toSFMLVector( b2Vec2 v ) {
+	return sf::Vector2f{v.x, v.y};
+}
 
 namespace Arcade {
 
@@ -75,6 +100,8 @@ namespace Arcade {
 		Level level;
 
 		bool fullscreen = false;
+
+		b2WorldId world;
 
 		static sf::Clock g_time;
 		sf::Time frame_time;
@@ -305,6 +332,7 @@ namespace Arcade {
 		BindManager bindManager;
 
 		Engine( std::string window_title ) : window_name( window_title ) {
+			world = b2CreateWorld(&DEFAULT_WORLD);
 			window_mode.size = window_mode.getDesktopMode().size.componentWiseDiv({2, 2});
 			window.create( window_mode, window_title ); 
 			camera = window.getView();
@@ -327,6 +355,7 @@ namespace Arcade {
 			window_mode( dimensions ),
 			window( dimensions, window_title ),
 			camera( window.getView() ) {
+			world = b2CreateWorld( &DEFAULT_WORLD );
 
 			if( !ImGui::SFML::Init( window ) ) {
 				throw std::runtime_error("Failed to init ImGui!");
@@ -385,6 +414,8 @@ namespace Arcade {
 		void update( sf::Time delta ) {
 			frame_time = delta;
 			ImGui::SFML::Update( window, delta );
+
+			b2World_Step( world, delta.asSeconds(), 4u );
 		}
 
 		void render() {
@@ -409,6 +440,10 @@ namespace Arcade {
 		}
 		void display() {
 			window.display();
+		}
+
+		[[nodiscard]] b2WorldId getWorld() {
+			return world;
 		}
 
 		std::weak_ptr<sf::Texture> getTexture( const std::string& identifier ) {
