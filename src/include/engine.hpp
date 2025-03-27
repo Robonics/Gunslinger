@@ -220,9 +220,7 @@ namespace Arcade {
 					ImGui::Text( "%s ->\n\t%s", level.getName().data(),  reinterpret_cast<const char*>(Localizer::getTranslation(level.getName()).c_str()) );
 					ImGui::Text("World Size: ");
 					ImGui::SameLine();
-					ImGui::TextColored( sf::Color::Magenta, "%ux%u (%u Chunks, %u Tiles)", level.getSize().x, level.getSize().y, level.getSize().x * level.getSize().y, level.getSize().x * level.getSize().y * level.getChunkSize() * level.getChunkSize() );
-					ImGui::Text( "Chunk size: " ); ImGui::SameLine();
-					ImGui::TextColored( sf::Color::Magenta, "%ux%u (%u tiles)", level.getChunkSize(), level.getChunkSize(), level.getChunkSize()*level.getChunkSize() );
+					ImGui::TextColored( sf::Color::Magenta, "%ux%u (%u total) Tiles", level.getSize().x, level.getSize().y, level.getSize().x * level.getSize().y );
 					ImGui::Spacing();
 					ImGui::Text("Engine Camera: %f, %f %fx%f", camera.getCenter().x, camera.getCenter().y, camera.getSize().x, camera.getSize().y);
 					ImGui::Text("Window Camera: %f, %f %fx%f", window.getView().getCenter().x, window.getView().getCenter().y, window.getView().getSize().x, window.getView().getSize().y);
@@ -332,7 +330,7 @@ namespace Arcade {
 
 		BindManager bindManager;
 
-		Engine( std::string window_title ) : window_name( window_title ) {
+		Engine( std::string window_title ) : window_name( window_title ), level(*this) {
 			b2SetLengthUnitsPerMeter( 10.f );
 			b2WorldDef def = get_default_world();
 			world = b2CreateWorld( &def );
@@ -357,7 +355,8 @@ namespace Arcade {
 			window_name( window_title ),
 			window_mode( dimensions ),
 			window( dimensions, window_title ),
-			camera( window.getView() ) {
+			camera( window.getView() ),
+			level( *this ) {
 			b2SetLengthUnitsPerMeter( 10.f );
 			b2WorldDef def = get_default_world();
 			world = b2CreateWorld( &def );
@@ -438,7 +437,7 @@ namespace Arcade {
 				level.editor_open = !level.editor_open;
 			}
 			if( level.editor_open ) {
-				level.drawEditor( *this );
+				level.drawEditor();
 			}
 
 			ImGui::SFML::Render( window );
@@ -502,11 +501,11 @@ namespace Arcade {
 		}
 
 		void loadLevel( const std::filesystem::path& path ) {
-			level.~Level();
+			level.unload();
 			std::ifstream file( path );
 			if( file ) {
 				try {
-					level = Level( *this, file );
+					level.load( file );
 					std::cout << "Loaded level " << path << "!" << std::endl;
 				}catch( Error<ErrorType::FILE_ERROR> e ) {
 					std::cerr << "\e[1;31mFailed to load level [" << (int)e.type() << "]: " <<  e.what() << "\e[0m" << std::endl;

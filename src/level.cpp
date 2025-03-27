@@ -1,5 +1,6 @@
 #include "include/level.hpp"
 #include <box2d/box2d.h>
+#include "SFML/Graphics/RectangleShape.hpp"
 #include "box2d/types.h"
 #include "imgui.h"
 #include "include/engine.hpp"
@@ -20,11 +21,13 @@
 #include <ios>
 #include <iostream>
 #include <iterator>
+#include <limits>
 #include <memory>
 #include <netinet/in.h>
 #include <sstream>
 #include <stdexcept>
 #include <unordered_map>
+#include <vector>
 
 #if defined(__linux__)
 #  include <endian.h>
@@ -36,8 +39,6 @@
 #  define be32toh(x) betoh32(x)
 #  define be64toh(x) betoh64(x)
 #endif
-
-#define TILE_SIZE 5.f
 
 using Arcade::Error;
 
@@ -64,13 +65,13 @@ const char* Arcade::TileRegistryEntry::RModeString(TileRenderMode m) {
 Arcade::Tile::Tile( uint8_t flags ) : flags(flags) {}
 Arcade::Tile::Tile( const std::shared_ptr<TileRegistryEntry>& entry ) : registryObject(entry), shape({TILE_SIZE,TILE_SIZE}) {}
 Arcade::Tile::Tile( const std::shared_ptr<TileRegistryEntry>& entry, uint8_t flags) : flags(flags), registryObject(entry), shape({TILE_SIZE,TILE_SIZE}) {}
-Arcade::Tile::Tile( Arcade::Engine& engine, const std::string& entry ) {
-	engine.getTileEntry( entry );
+Arcade::Tile::Tile( Arcade::Engine& engine, const std::string& entry ) : shape({TILE_SIZE,TILE_SIZE}) {
+	registryObject = engine.getTileEntry( entry );
 }
 Arcade::Tile::~Tile() {}
 void Arcade::Tile::setup_texture() {
 
-	if( registryObject.expired() ) return;
+	if( registryObject.expired() || (this->flags & Tile::Flags::Empty) ) return;
 	shape.setSize({TILE_SIZE, TILE_SIZE});
 	shape.setTexture( registryObject.lock()->texture.lock().get() );
 
@@ -109,106 +110,54 @@ const sf::FloatRect& Arcade::Tile::getBounds() {
 	return this->bounds;
 }
 void Arcade::Tile::draw(sf::RenderTarget& target, sf::RenderStates states) const {
-	if( this->registryObject.expired() ) return;
+	if( this->registryObject.expired() || (this->flags & Tile::Flags::Empty) ) return;
 	target.draw( this->shape, states );
 }
 std::weak_ptr<Arcade::TileRegistryEntry> Arcade::Tile::getRegistryEntry() {
 	return this->registryObject;
 }
 
-Arcade::Chunk::~Chunk() {
-
-}
-void Arcade::Chunk::draw(sf::RenderTarget& target, sf::RenderStates states) const {
-	// Be smart and cull ourselves
-	// if(!target.getView().getViewport().findIntersection( bounds ) && (flags & Flags::NoCull)) return;
-	
-	for( auto it = tiles.begin(); it != tiles.end(); it++ ) {
-		size_t i = std::distance( tiles.begin(), it );
-		unsigned long x = i % this->size;
-		unsigned long y = i / this->size;
-		sf::RenderStates n_state( states );
-		n_state.transform.translate({
-			x*TILE_SIZE,
-			y*TILE_SIZE
-		});
-		(*it).draw( target, n_state );
-	}
-}
-
-Arcade::Tile* Arcade::Chunk::getTileAt( sf::Vector2f pos ) {
-	size_t x = std::floor( (pos.x - this->bounds.position.x) / TILE_SIZE );
-	size_t y = std::floor( (pos.y - this->bounds.position.y) / TILE_SIZE );
-	if( x<0||x>=size||y<0||y>=size) return nullptr;
-	try {
-		return &tiles.at( y * size + x );
-	}catch( std::out_of_range e ) {
-		std::cout << "Failed to get Tile." << x << ", " << y << " size is " << tiles.size() << std::endl;
-		return nullptr;
-	}
-}
-
-void Arcade::Chunk::doTilePostInit( Engine& engine, b2BodyId body ) {
+void Arcade::Level::doTilePostInit() {
 	edges.clear();
 	for( size_t i = 0; i < tiles.size(); i++ ) {
-		size_t x = i % size;
-		size_t y = i / size;
+		uint32_t x = i % world_size.x;
+		uint32_t y = i / world_size.x;
 		
 		// Calculate the tile bounds
 		tiles[i].bounds = {
 			{
-				this->bounds.position.x + (x * TILE_SIZE),
-				this->bounds.position.y + (y * TILE_SIZE)
+				(x * TILE_SIZE),
+				(y * TILE_SIZE)
 			},
 			{TILE_SIZE, TILE_SIZE}	
 		};
-		if(tiles[i].flags & Arcade::Tile::Flags::Empty) continue;
 		// First, set up the neighbor nibble
 		tiles[i].neighbor.reset();
-
-		if( y != 0 ) { // Top
-			tiles[i].neighbor.set( 0u,
-				tiles[((y-1) * size) + x].registryObject.lock()
-					==
-				tiles[i].registryObject.lock()
-			);
-			tiles[i].g_neighbor.set( 0u,
-				!(tiles[((y-1) * size) + x].flags & Tile::Flags::Empty)
-			);
+		if(tiles[i].flags & Arcade::Tile::Flags::Empty) continue;
+		
+		for(int it = 0; it < 4; it++) {
+			uint32_t it_x = (it % 2)*(std::signbit(2-it)?-1:1) + x;
+			uint32_t it_y = ((it+1) % 2)*(std::signbit(1-it)?1:-1) + y;
+			
+			uint32_t index = (it_y * world_size.x) + it_x;
+			
+			if( it_x < world_size.x && it_y < world_size.y && index < tiles.size() ) {
+				if( !tiles[index].registryObject.expired() && !tiles[i].registryObject.expired() ) {
+					tiles[i].neighbor.set( it,
+						tiles[index].registryObject.lock()
+						==
+						tiles[i].registryObject.lock()
+					);
+				}
+				tiles[i].g_neighbor.set( it,
+					!(tiles[index].flags & Tile::Flags::Empty)
+				);
+			}else { // Everything outside the map is empty space
+				tiles[i].g_neighbor.reset( it );
+			}
 		}
-		if( x != size-1 ) { // Right
-			tiles[i].neighbor.set( 1u,
-				tiles[(y * size) + (x+1)].registryObject.lock()
-				==
-				tiles[i].registryObject.lock()
-			);
-			tiles[i].g_neighbor.set( 1u,
-				!(tiles[(y * size) + (x+1)].flags & Tile::Flags::Empty)
-			);
-		}
-		if( y != size-1 ) { // Bottom
-			tiles[i].neighbor.set( 2u,
-				tiles[((y+1) * size) + x].registryObject.lock()
-				==
-				tiles[i].registryObject.lock()
-			);
-			tiles[i].g_neighbor.set( 2u,
-				!(tiles[((y+1) * size) + x].flags & Tile::Flags::Empty)
-			);
-		}
-		if( x != 0 ) { // Left
-			tiles[i].neighbor.set( 3u,
-				tiles[(y * size) + (x-1)].registryObject.lock()
-				==
-				tiles[i].registryObject.lock()
-			);
-			tiles[i].g_neighbor.set( 3u,
-				!(tiles[(y*size) + (x-1)].flags & Tile::Flags::Empty)
-			);
-		}
-
+		
 		tiles[i].setup_texture();
-
 
 		if(!tiles[i].g_neighbor.test(0)) {
 			edges.emplaceEdge(sf::Vector2f{
@@ -252,40 +201,32 @@ void Arcade::Chunk::doTilePostInit( Engine& engine, b2BodyId body ) {
 		}
 	}
 
+	if( b2Body_IsValid(ground) ) {
+		b2DestroyBody( ground );
+	}
 	b2BodyDef def = b2DefaultBodyDef();
-	def.position = b2Vec2{ bounds.position.x, bounds.position.y };
-
+	ground = b2CreateBody( engine.getWorld(), &def );
+	
 	auto lists = edges.getShapes();
-	edges.attachChainShapes( body, this->chains );
-}
-const uint8_t Arcade::Chunk::getFlags() const {
-	return this->flags;
-}
-const sf::FloatRect Arcade::Chunk::getBounds() const {
-	return this->bounds;
+	edges.attachChainShapes( ground, this->chains );
 }
 
-Arcade::Level::Level( Arcade::Engine& engine, std::ifstream& file ) : chunks(  ) {
-	this->load( engine, file );
+Arcade::Level::Level( Arcade::Engine& engine ) : engine(engine) {}
+Arcade::Level::Level( Arcade::Engine& engine, std::ifstream& file ) : engine(engine) {
+	this->load( file );
 }
 Arcade::Level::~Level() {}
 
 void Arcade::Level::draw(sf::RenderTarget& target, sf::RenderStates states) const {
-	for( auto& [coord, chunk] : chunks ) {
+	for( auto& tile : tiles ) {
 		sf::RenderStates n_state( states );
-		n_state.transform.translate( chunk.bounds.position );
-		chunk.draw( target, n_state );
+		n_state.transform.translate( tile.bounds.position );
+		tile.draw( target, n_state );
 	}
 }
 
 // .alv is stored as BIG ENDIAN always.
-void Arcade::Level::load( Arcade::Engine& engine, std::ifstream& file ) {
-	if( b2Body_IsValid( this->ground ) ) {
-		// If we re-init the chunk, destroy the old bodys
-		b2DestroyBody( this->ground );
-	}
-	b2BodyDef def = b2DefaultBodyDef();
-	this->ground = b2CreateBody(engine.getWorld(), &def);
+void Arcade::Level::load( std::ifstream& file ) {
 
 	// Alright, first let's check on the status of the ifstream
 	if(!file.good()) throw Error<ErrorType::FILE_ERROR>("File is bad");
@@ -319,83 +260,76 @@ void Arcade::Level::load( Arcade::Engine& engine, std::ifstream& file ) {
 	world_y = be32toh( world_y );
 	world_size = { world_x, world_y };
 
-	file.read( (char*)&chunk_size, 4u );
-	chunk_size = be32toh( chunk_size );
+	std::cout << "\e[32mWorld Size is " << world_x << "x" << world_y << "\e[0m" << std::endl;
+	
+	std::unordered_map<uint16_t, std::string> tile_registry_dict;
+	uint16_t dict_size;
+	file.read( (char*)&dict_size, 2u );
+	dict_size = be16toh( dict_size );
 
-	// Now we sequentially read in each chunk
+	std::cout << "\e[32mDictionary has " << dict_size << " entries\e[0m" << std::endl;
+
+	for( uint16_t it = 0; it < dict_size; it++ ) {
+		uint16_t n;
+		file.read( (char*)&n, 2u );
+		n = be16toh( n );
+		std::string identifier;
+		char c;
+		while( file.read(&c, 1u) ) {
+			if(c == '\0') break;
+			identifier.insert( identifier.end(), c );
+		}
+
+		std::cout << "\t\e[32mEntry " << n << " refers to " << identifier << "\e[0m" << std::endl;
+
+		// Final sanity checks
+		if( identifier.length() < 1 ) continue;
+		tile_registry_dict.emplace( n, identifier );
+	}
+
+	// Now we sequentially read in each tile
 	for( size_t i = 0; i < world_x*world_y; i++ ) {
-		Chunk& chunk = chunks.try_emplace(sf::Vector2u{
-			static_cast<unsigned int>(i % world_x),
-			static_cast<unsigned int>(i / world_x)
-		}).first->second;
-		file.read( (char*)&chunk.flags, 1u );
 
-		chunk.bounds = {
-			{(i % world_x)*(chunk_size*TILE_SIZE), static_cast<int>(i / world_x)*(chunk_size*TILE_SIZE)},
-			{ chunk_size*TILE_SIZE, chunk_size*TILE_SIZE }
-		};
-		chunk.size = chunk_size;
+		uint8_t tile_header;
+		file.read( (char*)&tile_header, 1u );
 
-		if( !(chunk.flags & Chunk::Flags::HasTiles) ) {
+		if( (tile_header & Tile::Flags::Empty) ) {
+			Tile& tile = tiles.emplace_back( Tile(tile_header) );
 			continue;
 		}
 
-		std::unordered_map<uint8_t, std::string> chunk_dict;
-		uint8_t dict_size;
-		file.read( (char*)&dict_size, 1u );
+		uint16_t tile;
+		file.read( (char*)&tile, 2u );
+		tile = be16toh( tile );
 
-		for( uint8_t it = 0; it < dict_size; it++ ) {
-			uint8_t n;
-			file.read( (char*)&n, 1u );
-			std::string identifier;
-			char c;
-			while( file.read(&c, 1u) ) {
-				if(c == '\0') break;
-				identifier.insert( identifier.end(), c );
-			}
-
-			// Final sanity checks
-			if( identifier.length() < 1 ) continue;
-			chunk_dict.emplace( n, identifier );
+		try {
+			tiles.emplace_back(
+				Tile(engine.getTileEntry(tile_registry_dict.at(tile)).lock(), tile_header)
+			);
+		}catch(Error<ErrorType::RESOURCE_ERROR> e) {
+			std::cerr << "\e[1;33mFailed to load resource: " << tile << " (aka) '" << tile_registry_dict.at(tile) << "'. Defaulting to empty tile\e[0m" << std::endl;
+			tiles.emplace_back( Tile(tile_header) );
+			assert(false);
+		}catch( std::out_of_range e ) {
+			std::cerr << "\e[1;31mHey stupid! You screwed up your chunk dictionary. " << (int)tile << " wasn't in the dictionary" << "\n\t" << "Defaulting to empty tile\e[0m" << std::endl;
+			tiles.emplace_back( Tile(tile_header) );
+			assert(false);
 		}
-
-		// woohoo, we can finally read in tiles.
-		for( size_t it = 0; it < chunk_size*chunk_size; it++ ) {
-			uint8_t tile_header;
-			file.read( (char*)&tile_header, 1u );
-			if( tile_header & Tile::Flags::Empty ) {
-				chunk.tiles.emplace_back( tile_header );
-				continue;
-			};
-			/// \todo Implement Data
-			uint8_t tile;
-			file.read( (char*)&tile, 1u );
-			try {
-				chunk.tiles.emplace_back( engine.getTileEntry(chunk_dict.at(tile)).lock(), tile_header );
-			}catch(Error<ErrorType::RESOURCE_ERROR> e) {
-				std::cerr << "\e[32mFailed to load resource: " << e.what() << "\n\t" << "Defaulting to empty tile\e[0m" << std::endl;
-				chunk.tiles.emplace_back( tile_header );
-			}catch( std::out_of_range e ) {
-				std::cerr << "\e[32mHey stupid! You screwed up your chunk dictionary. " << (int)tile << " wasn't in the dictionary" << "\n\t" << "Defaulting to empty tile\e[0m" << std::endl;
-				chunk.tiles.emplace_back( tile_header );
-			}
-		}
-
-		chunk.doTilePostInit( engine, this->ground );
-
+		
 	}
+
+	doTilePostInit();
 }
-void Arcade::Level::load( Arcade::Engine& engine, const std::string& filename ) {
+void Arcade::Level::load( const std::string& filename ) {
 	std::ifstream file( filename );
 	if( file ) {
-		this->load( engine, file );
+		this->load( file );
 	}
 }
 void Arcade::Level::unload() {
-	this->chunk_size=0;
 	this->world_size = {0,0};
 	this->tl_key.clear();
-	this->chunks.clear();
+	this->tiles.clear();
 }
 
 void Arcade::Level::save( const std::filesystem::path& path ) const {
@@ -406,59 +340,43 @@ void Arcade::Level::save( const std::filesystem::path& path ) const {
 		file.write( tl_key.c_str(), tl_key.length() );
 		file.write("\0", 1u);
 		uint32_t world_x = htobe32(world_size.x);
-		uint32_t world_y = htobe32(world_size.x);
+		uint32_t world_y = htobe32(world_size.y);
 		file.write( (char*)&world_x, 4u );
 		file.write( (char*)&world_y, 4u );
-		uint32_t c_size = htobe32(chunk_size);
-		file.write((char*)&c_size, 4u);
 
-		std::vector<const std::pair<const sf::Vector2u, Chunk>*> sortedChunks;
-		for( const auto& pair : this->chunks ) {
-			sortedChunks.push_back( &pair );
+		// Time to build dictionary!
+		std::vector<std::string> added_tiles;
+		for( unsigned int i = 0; i < tiles.size(); i++ ) {
+			if( added_tiles.size() == std::numeric_limits<uint16_t>::max() ) break;
+			if( tiles.at(i).flags & Tile::Flags::Empty ) continue;
+			std::string& rname = tiles.at(i).registryObject.lock()->registry_name;
+			if(std::find(added_tiles.begin(), added_tiles.end(), rname) == added_tiles.end()) {
+				added_tiles.emplace_back( rname );
+			}
+		}
+		// Now we write the dictionary
+		uint16_t dict_size = static_cast<uint16_t>(added_tiles.size());
+		assert( dict_size == added_tiles.size() && "Lossy conversion! Tile dictionary is too large!" );
+		dict_size = htobe16(dict_size);
+		file.write((char*)&dict_size, 2u);
+		for( uint16_t i = 0; i < added_tiles.size(); i++ ) {
+			std::cout << "Writing entry " << i << " of " << added_tiles.size() << std::endl;
+			uint16_t be_i = htobe16(i);
+			file.write( (char*)&be_i, 2u );
+			file.write( added_tiles[i].c_str(), added_tiles[i].size() );
+			file.write("\0", 1u);
 		}
 
-		std::sort( sortedChunks.begin(), sortedChunks.end(), [this]( const auto* a, const auto* b ) {
-			uint32_t indexA = a->first.y * this->world_size.x + a->first.x;
-			uint32_t indexB = b->first.y * this->world_size.x + b->first.x;
-			return indexA < indexB;
-		});
+		for( auto t : tiles ) {
+			file.write( (char*)&t.flags, 1u );
+			if( (t.flags & Tile::Flags::Empty) ) continue;
 
-		for( auto chunk : sortedChunks ) {
-			auto [k, c] = *chunk;
-			file.write( (char*)&c.flags, 1u );
-			if( !(c.flags & Chunk::Flags::HasTiles) ) continue;
-
-			// Time to build dictionary!
-			std::vector<std::string> added_tiles;
-			for( int i = 0; i < c.tiles.size(); i++ ) {
-				if( added_tiles.size() == 255 ) break;
-				if( c.tiles[i].flags & Tile::Flags::Empty ) continue;
-				std::string& rname = c.tiles[i].registryObject.lock()->registry_name;
-				if(std::find(added_tiles.begin(), added_tiles.end(), rname) == added_tiles.end()) {
-					added_tiles.emplace_back( rname );
-				}
-			}
-			// Now we write the dictionary, up to a byte of entries
-			uint8_t size = static_cast<uint8_t>(added_tiles.size());
-			file.write((char*)&size, 1u);
-			for( uint8_t i = 0; i < size; i++ ) {
-				file.write( (char*)&i, 1u );
-				file.write( added_tiles[i].c_str(), added_tiles[i].size() );
+			auto it = std::find(added_tiles.begin(), added_tiles.end(), t.registryObject.lock()->registry_name);
+			if( it == added_tiles.end() ) {
 				file.write("\0", 1u);
-			}
-
-			// Time to write tile data!
-			for( Tile t : c.tiles ) {
-				file.write( (char*)&t.flags, 1u );
-				if( t.flags & Tile::Flags::Empty ) continue;
-				// TODO: Tile data goes here
-				auto it = std::find(added_tiles.begin(), added_tiles.end(), t.registryObject.lock()->registry_name);
-				if( it == added_tiles.end() ) {
-					file.write("\0", 1u);
-				}else {
-					uint8_t i = std::distance(added_tiles.begin(), it);
-					file.write((char*)&i, 1u);
-				}
+			}else {
+				uint16_t i = htobe16(std::distance(added_tiles.begin(), it));
+				file.write((char*)&i, 2u);
 			}
 
 		}
@@ -470,67 +388,71 @@ void Arcade::Level::save( const std::filesystem::path& path ) const {
 	}
 }
 
-void Arcade::Level::resize( uint32_t target_x, uint32_t target_y ) {
-	// Here we erase any chunks that are outside our target size
-	for( auto& [ coord, chunk ] : chunks ) {
-		if( coord.x >= target_x || coord.y >= target_y ) {
-			chunks.erase( coord );
+void Arcade::Level::placeTileAt( sf::Vector2u grid_pos, const Tile& tile ) {
+
+	if( grid_pos.x >= world_size.x ) {
+		// Calculate the insert positions:
+		for( long y = world_size.y - 1; y >= 0; y-- ) {
+			tiles.insert( tiles.begin() + (y * world_size.x + world_size.x), grid_pos.x - world_size.x + 1, Tile(Tile::Flags::Empty) );
 		}
+		world_size.x = grid_pos.x + 1;
+	}
+	if( grid_pos.y >= world_size.y ) {
+		tiles.insert( tiles.end(), world_size.x * (grid_pos.y - world_size.y + 1), Tile(Tile::Flags::Empty) );
+		world_size.y = grid_pos.y + 1;
 	}
 
-	for( uint32_t x = 0; x < target_x; x++ ) {
-		for( uint32_t y = 0; y < target_y; y++ ) {
-			// If we don't have a chunk at this position, make one
-			if( chunks.find(sf::Vector2u{x, y}) == chunks.end() ) {
-				auto& chunk = chunks.try_emplace(sf::Vector2u{x, y}).first->second;
-				chunk.size = this->chunk_size;
-				chunk.flags = Chunk::Flags::HasTiles;
-				chunk.bounds = sf::FloatRect{
-					{ x*this->chunk_size*TILE_SIZE,y*this->chunk_size*TILE_SIZE },
-					{ TILE_SIZE*this->chunk_size, TILE_SIZE*this->chunk_size }
-				};
-				// Populate it with empty tiles
-				for(uint32_t i = 0; i < this->chunk_size*this->chunk_size; i++) {
-					chunk.tiles.emplace_back( Tile::Flags::Empty );
-				}
+	tiles[grid_pos.y * world_size.x + grid_pos.x] = tile;
+
+	doTilePostInit();
+}
+void Arcade::Level::removeTileAt( sf::Vector2u grid_pos ) {
+	size_t i = (grid_pos.y * world_size.x + grid_pos.x);
+	if( i > tiles.size() ) return;
+
+	tiles[i] = Tile(Tile::Flags::Empty);
+
+	uint32_t max_x = 1;
+	uint32_t max_y = 1;
+	for (uint32_t y = 0; y < world_size.y; ++y) {
+		for (uint32_t x = 0; x < world_size.x; ++x) {
+			// Assume that a tile equal to Tile(Tile::Flags::Empty) is empty.
+			// Adjust this comparison if you have a different mechanism.
+			if (!(tiles[y * world_size.x + x].flags & Tile::Flags::Empty)) {
+				max_x = std::max(max_x, x + 1);
+				max_y = std::max(max_y, y + 1);
 			}
 		}
 	}
 
-	this->world_size.x = target_x;
-	this->world_size.y = target_y;
+	if( max_x < world_size.x || max_y < world_size.y ) {
+		std::vector<Tile> n_tiles(max_x * max_y, Tile(Tile::Flags::Empty));
+	
+		for(uint32_t y = 0; y < max_y; y++) {
+			for(uint32_t x = 0; x < max_x; x++) {
+				n_tiles[y * max_x + x] = tiles[y * world_size.x + x];
+			}
+		}
+
+		tiles.swap( n_tiles );
+		world_size = sf::Vector2u{max_x, max_y};
+	}
+
+	doTilePostInit();
 }
 
-void Arcade::Level::drawEditor( Arcade::Engine& engine ) {
+void Arcade::Level::drawEditor() {
 
-	ImGui::Begin("Chunk Debugger");
+	ImGui::Begin("Tilemap Debugger");
 
-	for( const auto& [k, chunk] : chunks ) {
-		ImGui::PushID( k.y * world_size.x + k.x );
+	for( size_t i = 0; i < tiles.size(); i++ ) {
+		ImGui::PushID(i);
+		if( ImGui::TreeNode(std::format("Tile {}", i).c_str()) ) {
 
-		if( ImGui::TreeNode("", "Chunk (%d, %d)", k.x, k.y) ) {
-
-			ImGui::TextColored( sf::Color::Magenta, "Size %dx%d", chunk.size, chunk.size );
-			ImGui::TextColored( sf::Color::Cyan, "(%f, %f) %fx%f", chunk.bounds.position.x, chunk.bounds.position.y, chunk.bounds.size.x, chunk.bounds.size.y );
-			ImGui::TextColored( sf::Color::Cyan, "(Flags 0x%X", chunk.flags );
-			ImGui::TextColored( sf::Color::Magenta, "#tiles: %zu", chunk.tiles.size() );
-			// ImGui::TextColored( sf::Color::Magenta, "#shapes: %zu", chunk.shapes.size() );
-
-			// for( size_t i = 0; i < chunk.shapes.size(); i++ ) {
-			// 	ImGui::PushID( &(chunk.shapes[i]) );
-			// 	std::string s;
-			// 	sprintf( s.data(), "Shape %zu", i );
-			// 	ImGui::SeparatorText( s.c_str() );
-			// 	for( size_t i2 = 0; i2 < chunk.shapes[i].m_count; i2++ ) {
-			// 		const auto& p = chunk.shapes[i].m_vertices[i2];
-			// 		ImGui::Text("Point %zu: (%f, %f)", i2, p.x, p.y);
-			// 	}
-			// 	ImGui::PopID();
-			// }
+			ImGui::Text("(%f, %f) %fx%f", tiles[i].bounds.position.x, tiles[i].bounds.position.y, tiles[i].bounds.size.x, tiles[i].bounds.size.y );
 
 			ImGui::TreePop();
 		}
-
 		ImGui::PopID();
 	}
 
@@ -542,7 +464,6 @@ void Arcade::Level::drawEditor( Arcade::Engine& engine ) {
 	shape.setOutlineThickness( 1.0f );
 
 	ImGui::Begin("Level Editor", NULL, ImGuiWindowFlags_MenuBar );
-	bool resize_popup{};
 	if( ImGui::BeginMenuBar() ) {
 		if( ImGui::BeginMenu("File") ) {
 
@@ -553,7 +474,7 @@ void Arcade::Level::drawEditor( Arcade::Engine& engine ) {
 				).result();
 				if( inf.size() > 0 ) {
 					this->unload();
-					this->load( engine, inf[0] );
+					this->load( inf[0] );
 				}
 			}
 			if(ImGui::MenuItem("Save As...", "Ctrl + S")) {
@@ -570,37 +491,13 @@ void Arcade::Level::drawEditor( Arcade::Engine& engine ) {
 
 			ImGui::EndMenu();
 		}
-		if( ImGui::BeginMenu("Level") ) {
-			if( ImGui::MenuItem("Resize") ) {
-				resize_popup = true;
-			}
-			ImGui::EndMenu();
-		}
 		ImGui::EndMenuBar();
-	}
-
-	if(resize_popup) ImGui::OpenPopup("LevelEditor_Resize");
-	if( ImGui::BeginPopup("LevelEditor_Resize") ) {
-		ImGui::Text("World Size: ");
-		ImGui::SameLine();
-		static int resize_target[2] = {0, 0};
-		ImGui::InputInt2("##1", resize_target);
-		ImGui::Text("Chunk Size: ");
-		ImGui::SameLine();
-		if( ImGui::Button("Resize") ) {
-			resize( resize_target[0], resize_target[1] );
-		}
-		ImGui::EndPopup();
 	}
 
 	ImGui::Text("%s\n\t-> %s", tl_key.c_str(),	reinterpret_cast<const char*>(Localizer::getTranslation(tl_key).c_str()));
 	ImGui::Text( "Current Size: " );
 	ImGui::SameLine();
 	ImGui::TextColored( sf::Color::Magenta, "%ux%u Chunks", world_size.x, world_size.y );
-
-	ImGui::Text("Chunk Size: ");
-	ImGui::SameLine();
-	ImGui::TextColored( sf::Color::Magenta, "%ux%u Tiles", chunk_size, chunk_size );
 
 	static LevelEditorTool selected_tool = LevelEditorTool::None;
 
@@ -635,9 +532,7 @@ void Arcade::Level::drawEditor( Arcade::Engine& engine ) {
 					size_t i = std::distance( engine.tile_registry.begin(), it );
 					if( i % n_tiles ) ImGui::SameLine(); 
 					ImGui::PushID(i);
-					std::string s;
-					sprintf(s.data(), "TileButtonLabel_%zu", i);
-					if(ImGui::ImageButton( s.c_str(), *it->second->getTexture().lock(), {IMAGE_SIZE, IMAGE_SIZE} )) {
+					if(ImGui::ImageButton( std::format("TileButtonLabel_%zu", i).c_str(), *it->second->getTexture().lock(), {IMAGE_SIZE, IMAGE_SIZE} )) {
 						selected_tile_entry = it->first;
 					}
 					static ImU32 col_default = IM_COL32(255, 255, 255, 255);
@@ -670,23 +565,17 @@ void Arcade::Level::drawEditor( Arcade::Engine& engine ) {
 			ImGui::PopStyleVar(3);
 
 			auto p = engine.getWindow().mapPixelToCoords( static_cast<sf::Vector2i>(ImGui::GetMousePos()) );
-			auto chunk = this->getChunkAt( p );
-			if( chunk != nullptr ) {
-				auto tile = chunk->getTileAt( p );
-				if( tile != nullptr ) {
-					shape.setPosition( tile->bounds.position );
-					shape.setSize( tile->bounds.size );
-					engine.getWindow().draw( shape );
+			if( p.x > 0.f && p.y > 0.f ) {
+				sf::Vector2u g_pos{static_cast<unsigned int>(std::floor( p.x / TILE_SIZE )), static_cast<unsigned int>(std::floor( p.y / TILE_SIZE ))};
+				shape.setPosition({ g_pos.x * TILE_SIZE, g_pos.y * TILE_SIZE });
+				shape.setSize({ TILE_SIZE, TILE_SIZE });
+				engine.getWindow().draw( shape );
 
-					if( engine.bindManager.startedPressing("Editor:Tool:Primary") && !selected_tile_entry.empty() ) {
-						tile->flags &= ~Tile::Flags::Empty;
-						tile->registryObject = engine.getTileEntry( selected_tile_entry );
-						chunk->doTilePostInit( engine, this->ground );
-					}else if ( engine.bindManager.startedPressing("Editor:Tool:Secondary") && !selected_tile_entry.empty()  ) {
-						tile->flags |= Tile::Flags::Empty;
-						tile->registryObject.reset();
-						chunk->doTilePostInit( engine, this->ground );
-					}
+				if( engine.bindManager.startedPressing("Editor:Tool:Primary") && !selected_tile_entry.empty() ) {
+					Tile t( engine, selected_tile_entry );
+					placeTileAt( g_pos, t );
+				}else if ( engine.bindManager.startedPressing("Editor:Tool:Secondary") && !selected_tile_entry.empty()  ) {
+					removeTileAt( g_pos );
 				}
 			}
 		
@@ -703,7 +592,7 @@ void Arcade::Level::drawEditor( Arcade::Engine& engine ) {
 				static sf::RectangleShape selected_outline({TILE_SIZE, TILE_SIZE});
 				selected_outline.setFillColor( sf::Color::Transparent );
 				selected_outline.setOutlineColor( sf::Color::Blue );
-				selected_outline.setOutlineThickness( 5.0f );
+				selected_outline.setOutlineThickness( .5f );
 
 				selected_outline.setPosition( selected_tile->bounds.position );
 
@@ -718,6 +607,18 @@ void Arcade::Level::drawEditor( Arcade::Engine& engine ) {
 	};
 	
 	ImGui::End();
+
+	// Helper
+	static sf::RectangleShape outline;
+	outline.setFillColor( sf::Color::Transparent );
+	outline.setOutlineColor( sf::Color::White );
+	outline.setOutlineThickness( 0.5f );
+
+	outline.setPosition({0.f,0.f});
+	outline.setSize( {world_size.x * TILE_SIZE, world_size.y * TILE_SIZE } );
+
+	engine.getWindow().draw( outline );
+
 }
 
 const std::string& Arcade::Level::getName() {
@@ -726,29 +627,16 @@ const std::string& Arcade::Level::getName() {
 const sf::Vector2u Arcade::Level::getSize() {
 	return this->world_size;
 }
-const uint32_t Arcade::Level::getChunkSize() {
-	return this->chunk_size;
-}
 
-Arcade::Chunk* Arcade::Level::getChunkAt( sf::Vector2f pos ) {
-	size_t x = std::floor( pos.x / (chunk_size * TILE_SIZE) );
-	size_t y = std::floor( pos.y / (chunk_size * TILE_SIZE) );
+Arcade::Tile* Arcade::Level::getTileAt( sf::Vector2f pos ) {
+	size_t x = std::floor( pos.x / TILE_SIZE );
+	size_t y = std::floor( pos.y / TILE_SIZE );
 	if( x < 0 || x >= world_size.x || y < 0 || y >= world_size.y )
 		return nullptr;
-
 	try {
-		return &chunks.at(sf::Vector2u{
-			static_cast<unsigned int>(x), static_cast<unsigned int>(y)
-		});
+		return &tiles.at( y * world_size.x + x );
 	}catch( std::out_of_range e ) {
-		std::cout << "Failed to get chunk." << x << ", " << y << " size is " << chunks.size() << std::endl;
+		std::cout << "Failed to get chunk." << x << ", " << y << std::endl;
 		return nullptr;
 	}
-}
-Arcade::Tile* Arcade::Level::getTileAt( sf::Vector2f pos ) {
-	Chunk* chunk = this->getChunkAt( pos );
-	if( chunk != nullptr ) {
-		return chunk->getTileAt( pos );
-	}
-	return nullptr;
 }

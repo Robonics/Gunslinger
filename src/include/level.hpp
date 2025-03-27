@@ -5,9 +5,10 @@
 #include "box2d/id.h"
 #include "edge_buffer.hpp"
 #include <bitset>
-#include <unordered_map>
+
 #define ALV_MAGIC 0x00414C56
 #define ATSET_MAGIC 0x004154534554AFAF
+#define TILE_SIZE 5.f
 
 #include "SFML/Graphics/RectangleShape.hpp"
 #include "SFML/Graphics/Transformable.hpp"
@@ -30,7 +31,6 @@ namespace Arcade {
 
 	class TileRegistryEntry {
 		friend class Tile;
-		friend class Chunk;
 		friend class Level;
 		friend class Engine;
 		TileRenderMode r_mode{TileRenderMode::Static};
@@ -52,10 +52,11 @@ namespace Arcade {
 	};
 
 	class Tile : protected sf::Drawable, sf::Transformable {
-		friend class Chunk;
 		friend class Level;
-		std::bitset<4> neighbor;
-		std::bitset<4> g_neighbor;
+		friend class Engine;
+
+		std::bitset<4> neighbor{};
+		std::bitset<4> g_neighbor{};
 		uint8_t flags{};
 		std::weak_ptr<TileRegistryEntry> registryObject;
 		sf::RectangleShape shape;
@@ -76,6 +77,7 @@ namespace Arcade {
 		const sf::FloatRect& getBounds();
 
 		Tile()=delete;
+		Tile( const Tile& )=default;
 		Tile( uint8_t flags );
 		explicit Tile( const std::shared_ptr<TileRegistryEntry>& );
 		explicit Tile( const std::shared_ptr<TileRegistryEntry>&, uint8_t );
@@ -84,38 +86,6 @@ namespace Arcade {
 
 		std::weak_ptr<TileRegistryEntry> getRegistryEntry();
 	};
-	class Chunk : public sf::Drawable, sf::Transformable {
-		friend class Level;
-
-		sf::FloatRect bounds;
-
-		uint8_t flags;
-		uint32_t size{1};
-		std::vector<Tile> tiles;
-	protected:
-		virtual void draw(sf::RenderTarget& target, sf::RenderStates states) const override;
-	public:
-		enum Flags {
-			HasTiles = 0b10000000,
-			DeadChunk = 0b0100000,
-			OoB = 0b00100000,
-			NoCull = 0b00010000
-		};
-
-		EdgeBuffer<float> edges;
-		std::vector<b2ChainId> chains;
-
-		Chunk()=default;
-		~Chunk();
-		Tile* getTileAt( sf::Vector2f pos );
-
-		/// This calculates EVERYTHING. Autotile indecies, collison, all of it.
-		/// This should never ever EVER be called regularly. 
-		void doTilePostInit( Engine& engine, b2BodyId body );
-
-		const uint8_t getFlags() const;
-		const sf::FloatRect getBounds() const;
-	};
 
 	enum LevelEditorTool {
 		None=0,
@@ -123,49 +93,43 @@ namespace Arcade {
 		TileSelect
 	};
 
-	struct Vector2uHash {
-		std::size_t operator()(const sf::Vector2u& v) const noexcept {
-			const uint64_t a = static_cast<uint64_t>(v.x);
-			const uint64_t b = static_cast<uint64_t>(v.y);
-		
-			const uint64_t h0 = (b << 32) | a;
-			const uint64_t h1 = (a << 32) | b;
-		
-			return (v.x < v.y) ? h0 : h1; 
-		}
-	};
-
 	class Level : public sf::Drawable {
 		friend class Engine;
-		friend class Chunk;
 
 		bool editor_open{};
 
 		std::string tl_key;
 		sf::Vector2u world_size;
-		uint32_t chunk_size;
-		std::unordered_map<sf::Vector2u, Chunk, Vector2uHash> chunks;
+		
+		std::vector<Tile> tiles;
 
+		Engine& engine;
+		
 	protected:
 		b2BodyId ground;
+		EdgeBuffer<float> edges;
+		std::vector<b2ChainId> chains;
 		virtual void draw(sf::RenderTarget& target, sf::RenderStates states) const override;
-		void resize( uint32_t x, uint32_t y );
-		void drawEditor(  Arcade::Engine& engine  );
+		void drawEditor();
+		void doTilePostInit();
+
+		/// Dynamically resizes the level. You should always use this over modifying the tile data directly.
+		void placeTileAt( sf::Vector2u grid_pos, const Tile& tile );
+		void removeTileAt( sf::Vector2u grid_pos );
 	public:
-		Level() = default;
+		Level() = delete;
+		Level( Arcade::Engine& );
 		Level( Arcade::Engine&, std::ifstream& file );
 		~Level();
 	
 		void save( const std::filesystem::path& path ) const;
 		void unload();
-		void load( Arcade::Engine&, std::ifstream& file );
-		void load( Arcade::Engine&, const std::string& filename );
+		void load( std::ifstream& file );
+		void load( const std::string& filename );
 
 		const std::string& getName();
 		const sf::Vector2u getSize();
-		const uint32_t getChunkSize();
 
-		Chunk* getChunkAt(sf::Vector2f pos);
 		Tile* getTileAt(sf::Vector2f pos);
 
 	};
