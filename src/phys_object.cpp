@@ -73,6 +73,9 @@ void PhysObject::applyImpulseAt( sf::Vector2f impulse, sf::Vector2f local_pos ) 
 	auto p  = t.transformPoint( local_pos );
 	b2Body_ApplyLinearImpulse(b2_id, toB2DVector(impulse), toB2DVector(p), true);
 }
+void PhysObject::applyAngularImpulse( sf::Angle impulse ) {
+	b2Body_ApplyAngularImpulse(b2_id, impulse.asRadians(), true);
+}
 
 void PhysObject::setPosition( sf::Vector2f pos ) {
 	b2Body_SetTransform(b2_id, toB2DVector(pos), b2Body_GetRotation(b2_id));
