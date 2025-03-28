@@ -1,6 +1,7 @@
 #pragma once
 
 #include <box2d/box2d.h>
+#include "SFML/System/Vector2.hpp"
 #include "arcade_errors.hpp"
 #include "bind.hpp"
 #include "box2d/math_functions.h"
@@ -28,6 +29,15 @@ inline sf::Vector2f toSFMLVector( ImVec2 v ) {
 }
 inline sf::Vector2f toSFMLVector( b2Vec2 v ) {
 	return sf::Vector2f{v.x, v.y};
+}
+inline b2Vec2 toB2DVector( sf::Vector2f v ) {
+	return b2Vec2{ v.x, v.y };
+}
+inline b2Vec2 toB2DVector( ImVec2 v ) {
+	return b2Vec2{ v.x, v.y };
+}
+inline b2Rot toB2DAngle( sf::Angle a ) {
+	return b2Rot{ a.asRadians() };
 }
 
 namespace Arcade {
