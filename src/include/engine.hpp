@@ -6,6 +6,7 @@
 #include "bind.hpp"
 #include "box2d/math_functions.h"
 #include "box2d/types.h"
+#include "entity.hpp"
 #include "imgui_internal.h"
 #include "level.hpp"
 #include "localizer.hpp"
@@ -114,13 +115,14 @@ namespace Arcade {
 
 		b2WorldId world;
 
-		static sf::Clock g_time;
+		static inline sf::Clock g_time{};
 		sf::Time frame_time;
 		sf::View camera;
 
 		std::unordered_map<std::string, std::unique_ptr<VEventWrapper>> events;
 		std::unordered_map<std::string, std::shared_ptr<sf::Texture>> texture_registry;
 		std::unordered_map<std::string, std::shared_ptr<TileRegistryEntry>> tile_registry;
+		std::vector<Entity*> entities;
 
 		bool debug_open{};
 		void debug_imgui() {
@@ -336,6 +338,19 @@ namespace Arcade {
 			
 		}
 
+	protected:
+		friend Entity::Entity( Engine& eng );
+		void registerEntity( Entity* ent ) {
+			assert(std::find( entities.begin(), entities.end(), ent ) == entities.end() && "Entity is already registered");
+			entities.push_back( ent );
+		}
+		friend Entity::~Entity();
+		void deregisterEntity( Entity* ent ) {
+			auto it = std::find( entities.begin(), entities.end(), ent );
+			assert( it != entities.end() && "Entity is not registered" );
+			entities.erase( it );
+		}
+
 	public:
 
 		BindManager bindManager;
@@ -378,6 +393,7 @@ namespace Arcade {
 			init_default_events();
 			load_static_resources();
 		}
+		Engine( const Engine& )=delete; /* No Copy */
 		~Engine() {
 			close();
 		}
@@ -429,6 +445,9 @@ namespace Arcade {
 			frame_time = delta;
 			ImGui::SFML::Update( window, delta );
 
+			for( Entity* ent : entities ) {
+				ent->tick( delta );
+			}
 			b2World_Step( world, delta.asSeconds(), 4u );
 		}
 
@@ -436,6 +455,12 @@ namespace Arcade {
 			window.clear();
 
 			window.draw( level );
+
+			for( Entity* ent : entities ) {
+				if( RenderableEntity* rent=dynamic_cast<RenderableEntity*>(ent) ) {
+					window.draw( *rent );
+				}
+			}
 
 			if( bindManager.startedPressing("Meta:Debug") ) {
 				debug_open = !debug_open;
@@ -501,8 +526,11 @@ namespace Arcade {
 			this->window.setView( this->camera );
 		}
 
-		const sf::Time& getFrameTime() {
+		sf::Time getFrameTime() const {
 			return this->frame_time;
+		}
+		sf::Time getGlobalTime() const {
+			return Engine::g_time.getElapsedTime();
 		}
 
 		void close() {

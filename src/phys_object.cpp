@@ -10,21 +10,21 @@
 using Arcade::PhysSettings;
 using Arcade::PhysObject;
 
-PhysObject::PhysObject( b2WorldId world, PhysSettings& settings ) {
+PhysObject::PhysObject( b2WorldId world, b2BodyDef def, PhysSettings settings[], size_t n_shape ) {
 	assert( b2World_IsValid( world ) && "Passed world is not valid");
-	b2_id = b2CreateBody( world, &settings.def );
+	b2_id = b2CreateBody( world, &def );
 	assert( b2Body_IsValid(b2_id) && "Body failed to init");
-	assert( settings.shape_count > 0 && "Must pass at least one shape!");
-	for( size_t i = 0; i < settings.shape_count; i++ ) {
-		switch( settings.type ) {
+	assert( n_shape > 0 && "Must pass at least one shape!");
+	for( size_t i = 0; i < n_shape; i++ ) {
+		switch( settings[i].type ) {
 			case b2ShapeType::b2_polygonShape:
-				b2CreatePolygonShape(b2_id, &settings.shapes[i], &std::get<b2Polygon>(settings.shape_data[i]));
+				b2CreatePolygonShape(b2_id, &settings[i].shape, &std::get<b2Polygon>(settings[i].shape_data));
 				break;
 			case b2_circleShape:
-				b2CreateCircleShape( b2_id, &settings.shapes[i], &std::get<b2Circle>(settings.shape_data[i])  );
+				b2CreateCircleShape( b2_id, &settings[i].shape, &std::get<b2Circle>(settings[i].shape_data)  );
 				break;
 			case b2_capsuleShape:
-				b2CreateCapsuleShape( b2_id, &settings.shapes[i], &std::get<b2Capsule>( settings.shape_data[i]) );
+				b2CreateCapsuleShape( b2_id, &settings[i].shape, &std::get<b2Capsule>( settings[i].shape_data) );
 				break;
 			default:
 				assert( "Unsupperted Shape" );
@@ -45,6 +45,9 @@ sf::Vector2f PhysObject::getPosition() const {
 }
 sf::Vector2f PhysObject::getVelocity() const {
 	return toSFMLVector( b2Body_GetLinearVelocity(b2_id) );
+}
+b2AABB PhysObject::getAABB() const {
+	return b2Body_ComputeAABB( getID() );
 }
 
 sf::Angle PhysObject::getRotation() const {

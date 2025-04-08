@@ -42,7 +42,7 @@ if(DEFINED DEBUG)
 	add_link_options(-g)
 endif()
 
-add_executable(Gunslinger src/main.cpp src/level.cpp src/localizer.cpp)
+add_executable(Gunslinger src/main.cpp src/level.cpp src/localizer.cpp src/phys_object.cpp src/entity.cpp)
 target_link_libraries(Gunslinger PUBLIC
 	SFML::Graphics
 	ImGui-SFML::ImGui-SFML
