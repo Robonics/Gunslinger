@@ -1,6 +1,7 @@
 #pragma once
 
 #include <box2d/box2d.h>
+
 #include "SFML/System/Vector2.hpp"
 #include "arcade_errors.hpp"
 #include "bind.hpp"
@@ -81,21 +82,9 @@ namespace Arcade {
 
 	class Engine {
 		static b2WorldDef get_default_world() {
-			return b2WorldDef{
-				.gravity = b2Vec2(0.0f, 20.0f),
-				.restitutionThreshold = 1.0f * b2GetLengthUnitsPerMeter(),
-				.hitEventThreshold = 1.0f * b2GetLengthUnitsPerMeter(),
-				.contactHertz = 30.0,
-				.contactDampingRatio = 10.0f,
-				.contactPushMaxSpeed = 3.0f * b2GetLengthUnitsPerMeter(),
-				.jointHertz = 60.0,
-				.jointDampingRatio = 2.0f,
-				// 400 meters per second, faster than the speed of sound
-				.maximumLinearSpeed = 400.0f * b2GetLengthUnitsPerMeter(),
-				.enableSleep = true,
-				.enableContinuous = true,
-				.internalValue = 1152023 /* Secret Cookie... */
-			};
+			b2WorldDef def = b2DefaultWorldDef();
+			def.gravity = b2Vec2(0.0f, 20.0f);
+			return def;
 		}
 		friend class Level;
 
@@ -123,6 +112,7 @@ namespace Arcade {
 		std::unordered_map<std::string, std::shared_ptr<sf::Texture>> texture_registry;
 		std::unordered_map<std::string, std::shared_ptr<TileRegistryEntry>> tile_registry;
 		std::vector<Entity*> entities;
+		Entity* debug_entity = nullptr;
 
 		bool debug_open{};
 		void debug_imgui() {
@@ -238,9 +228,28 @@ namespace Arcade {
 					ImGui::Text("Window Camera: %f, %f %fx%f", window.getView().getCenter().x, window.getView().getCenter().y, window.getView().getSize().x, window.getView().getSize().y);
 					ImGui::EndTabItem();
 				}
+				if( ImGui::BeginTabItem("Entity") ) {
+					
+					if( ImGui::BeginListBox("") ) {
+						for( size_t i = 0; i < entities.size(); i++ ) {
+							if( ImGui::Selectable( std::format("[{}] {} @{}", i, entities[i]->GET_NAME(), reinterpret_cast<std::intptr_t>(entities[i])).c_str(), entities[i] == debug_entity ) ) {
+								debug_entity = entities[i];
+							}
+						}
+						ImGui::EndListBox();
+					}
+
+					ImGui::EndTabItem();
+				}
 				ImGui::EndTabBar();
 			}
 			ImGui::End();
+
+			if( debug_entity != nullptr ) {
+				ImGui::Begin("Entity Debug");
+				debug_entity->debug();
+				ImGui::End();
+			}
 		}
 
 		void init_default_events() {
@@ -346,6 +355,7 @@ namespace Arcade {
 		}
 		friend Entity::~Entity();
 		void deregisterEntity( Entity* ent ) {
+			if( debug_entity == ent ) debug_entity = nullptr;
 			auto it = std::find( entities.begin(), entities.end(), ent );
 			assert( it != entities.end() && "Entity is not registered" );
 			entities.erase( it );

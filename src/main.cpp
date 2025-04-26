@@ -34,8 +34,10 @@ int main( int argc, const char** argv ) {
 	engine.loadLevel("../levels/test.alv");
 
 	Player player( engine );
-
 	player.setPosition( sf::Vector2f{20.f, 0.f} );
+	player.setJumpPower( 20.0f );
+	player.setAcceleration( 20.0f );
+	player.setMoveSpeed( 20.0f );
 
 	engine.bindManager.bind("Meta:Menu", sf::Keyboard::Key::Escape);
 	engine.bindManager.bind("Meta:Debug", sf::Keyboard::Key::P).setModifiers(false, false, true, false);
@@ -47,7 +49,7 @@ int main( int argc, const char** argv ) {
 	engine.bindManager.bind("Editor:Tool:Primary", sf::Mouse::Button::Left);
 	engine.bindManager.bind("Editor:Tool:Secondary", sf::Mouse::Button::Right);
 
-	engine.bindManager.bind("Player:Float", sf::Keyboard::Key::Space);
+	engine.bindManager.bind("Player:Jump", sf::Keyboard::Key::Space);
 	engine.bindManager.bind("Player:Right", sf::Keyboard::Key::D);
 	engine.bindManager.bind("Player:Left", sf::Keyboard::Key::A);
 
